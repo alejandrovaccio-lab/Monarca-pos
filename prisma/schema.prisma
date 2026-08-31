@@ -7,6 +7,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum TaxType { IVA IEPS OTHER }
+enum TaxTreatment { EXEMPT ZERO_RATE TAXABLE }
+enum AuthorizationStatus { PENDING APPROVED REJECTED CANCELLED }
+enum AuthorizationType { PRICE_CHANGE MARGIN_CHANGE DISCOUNT_EXCEPTION SALE_CANCEL SALE_REFUND INVENTORY_ADJUSTMENT WASTE_EXCEPTION SHRINKAGE_EXCEPTION COST_CHANGE TAX_CHANGE REGISTER_EXCEPTION ACCESS_CHANGE OTHER }
+
 enum UserStatus {
   ACTIVE
   INACTIVE
@@ -15,6 +20,7 @@ enum UserStatus {
 enum ProductStatus {
   ACTIVE
   INACTIVE
+  ARCHIVED
 }
 
 enum InventoryMovementType {
@@ -74,6 +80,10 @@ model Organization {
   customers Customer[]
   suppliers Supplier[]
   auditLogs AuditLog[]
+  taxRules TaxRule[]
+  inventoryPolicies InventoryPolicy[]
+  pricingPolicies PricingPolicy[]
+  authorizations AuthorizationRequest[]
 
   @@index([name])
 }
@@ -98,6 +108,10 @@ model Branch {
   orders       Order[]
   transformations Transformation[]
   auditLogs    AuditLog[]
+  taxRules TaxRule[]
+  inventoryPolicies InventoryPolicy[]
+  pricingPolicies PricingPolicy[]
+  authorizations AuthorizationRequest[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -157,6 +171,8 @@ model User {
   auditLogs     AuditLog[]
   ordersPrepared Order[] @relation("OrderPreparedBy")
   transformations Transformation[]
+  authorizationRequests AuthorizationRequest[] @relation("AuthorizationRequester")
+  authorizationApprovals AuthorizationApproval[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -273,6 +289,7 @@ model Product {
   barcode          String?
   targetMargin     Decimal? @db.Decimal(7, 4)
   publicPrice      Decimal? @db.Decimal(14, 2)
+  archivedAt       DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -290,6 +307,9 @@ model Product {
   saleItems SaleItem[]
   transformationInputs TransformationInput[]
   transformationOutputs TransformationOutput[]
+  taxAssignments ProductTax[]
+  inventoryPolicies InventoryPolicy[]
+  pricingPolicies PricingPolicy[]
 
   @@unique([organizationId, sku])
   @@index([organizationId, categoryId])
@@ -589,6 +609,103 @@ model TransformationOutput {
   product Product @relation(fields: [productId], references: [id])
 
   @@index([transformationId])
+}
+
+
+model PricingPolicy {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  branchId String? @db.Uuid
+  productId String? @db.Uuid
+  name String
+  targetMargin Decimal @db.Decimal(7,4)
+  expectedWasteRate Decimal @default(0) @db.Decimal(7,4)
+  expectedShrinkageRate Decimal @default(0) @db.Decimal(7,4)
+  minMargin Decimal? @db.Decimal(7,4)
+  maxMargin Decimal? @db.Decimal(7,4)
+  isActive Boolean @default(true)
+  organization Organization @relation(fields:[organizationId], references:[id])
+  branch Branch? @relation(fields:[branchId], references:[id])
+  product Product? @relation(fields:[productId], references:[id])
+  @@index([organizationId, branchId, productId, isActive])
+}
+
+model TaxRule {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  branchId String? @db.Uuid
+  name String
+  type TaxType
+  treatment TaxTreatment
+  rate Decimal @db.Decimal(7,4)
+  validFrom DateTime
+  validTo DateTime?
+  isActive Boolean @default(true)
+  organization Organization @relation(fields:[organizationId], references:[id])
+  branch Branch? @relation(fields:[branchId], references:[id])
+  products ProductTax[]
+  @@index([organizationId, branchId, type, isActive])
+}
+
+model ProductTax {
+  productId String @db.Uuid
+  taxRuleId String @db.Uuid
+  product Product @relation(fields:[productId], references:[id], onDelete:Cascade)
+  taxRule TaxRule @relation(fields:[taxRuleId], references:[id], onDelete:Cascade)
+  @@id([productId, taxRuleId])
+}
+
+model InventoryPolicy {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  branchId String @db.Uuid
+  productId String @db.Uuid
+  minimumStock Decimal @default(0) @db.Decimal(14,4)
+  maximumStock Decimal? @db.Decimal(14,4)
+  reorderPoint Decimal @default(0) @db.Decimal(14,4)
+  targetDaysCoverage Decimal? @db.Decimal(7,2)
+  expectedWasteRate Decimal @default(0) @db.Decimal(7,4)
+  expectedShrinkageRate Decimal @default(0) @db.Decimal(7,4)
+  isActive Boolean @default(true)
+  organization Organization @relation(fields:[organizationId], references:[id])
+  branch Branch @relation(fields:[branchId], references:[id])
+  product Product @relation(fields:[productId], references:[id])
+  @@unique([branchId, productId])
+  @@index([organizationId, branchId, reorderPoint])
+}
+
+model AuthorizationRequest {
+  id String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  branchId String? @db.Uuid
+  requestedById String @db.Uuid
+  type AuthorizationType
+  status AuthorizationStatus @default(PENDING)
+  reason String
+  entityType String
+  entityId String? @db.Uuid
+  beforeData Json?
+  requestedData Json?
+  requestedAt DateTime @default(now())
+  resolvedAt DateTime?
+  organization Organization @relation(fields:[organizationId], references:[id])
+  branch Branch? @relation(fields:[branchId], references:[id])
+  requestedBy User @relation("AuthorizationRequester", fields:[requestedById], references:[id])
+  approvals AuthorizationApproval[]
+  @@index([organizationId, status, requestedAt])
+  @@index([branchId, status])
+}
+
+model AuthorizationApproval {
+  id String @id @default(uuid()) @db.Uuid
+  authorizationRequestId String @db.Uuid
+  approverId String @db.Uuid
+  approvedAt DateTime @default(now())
+  decision AuthorizationStatus
+  notes String?
+  request AuthorizationRequest @relation(fields:[authorizationRequestId], references:[id], onDelete:Cascade)
+  approver User @relation(fields:[approverId], references:[id])
+  @@index([authorizationRequestId, approvedAt])
 }
 
 model AuditLog {
