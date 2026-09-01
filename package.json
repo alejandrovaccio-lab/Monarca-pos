@@ -1,0 +1,20 @@
+{
+  "name": "monarca-pos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Monarca POS — sistema multi-sucursal y multitarea para Mercadito Esquina",
+  "scripts": {
+    "prisma:format": "prisma format",
+    "prisma:validate": "prisma validate",
+    "prisma:generate": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.15.0"
+  },
+  "devDependencies": {
+    "prisma": "^6.15.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
