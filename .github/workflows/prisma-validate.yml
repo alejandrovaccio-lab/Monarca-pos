@@ -1,0 +1,46 @@
+name: Prisma Schema Validation
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/prisma-validate.yml"
+  pull_request:
+    paths:
+      - "prisma/schema.prisma"
+      - "prisma/migrations/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/prisma-validate.yml"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate Prisma schema
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma format check
+        run: npx prisma format --check
+
+      - name: Prisma validate
+        run: npx prisma validate
