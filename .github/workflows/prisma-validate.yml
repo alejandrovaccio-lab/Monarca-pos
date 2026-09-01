@@ -23,7 +23,7 @@ jobs:
     name: Validate Prisma schema
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     env:
       DATABASE_URL: postgresql://monarca:monarca@localhost:5432/monarca_pos
 
@@ -39,8 +39,21 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Prisma format check
-        run: npx prisma format --check
+      - name: Format Prisma schema
+        run: npx prisma format
+
+      - name: Commit Prisma formatting
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          if git diff --quiet -- prisma/schema.prisma; then
+            echo "Schema already formatted."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add prisma/schema.prisma
+          git commit -m "style: format Prisma schema"
+          git push
 
       - name: Prisma validate
         run: npx prisma validate
