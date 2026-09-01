@@ -12,17 +12,20 @@ enum TaxType {
   IEPS
   OTHER
 }
+
 enum TaxTreatment {
   EXEMPT
   ZERO_RATE
   TAXABLE
 }
+
 enum AuthorizationStatus {
   PENDING
   APPROVED
   REJECTED
   CANCELLED
 }
+
 enum AuthorizationType {
   PRICE_CHANGE
   MARGIN_CHANGE
@@ -100,17 +103,17 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  branches  Branch[]
-  users     User[]
-  employees Employee[]
-  products  Product[]
-  customers Customer[]
-  suppliers Supplier[]
-  auditLogs AuditLog[]
-  taxRules TaxRule[]
+  branches          Branch[]
+  users             User[]
+  employees         Employee[]
+  products          Product[]
+  customers         Customer[]
+  suppliers         Supplier[]
+  auditLogs         AuditLog[]
+  taxRules          TaxRule[]
   inventoryPolicies InventoryPolicy[]
-  pricingPolicies PricingPolicy[]
-  authorizations AuthorizationRequest[]
+  pricingPolicies   PricingPolicy[]
+  authorizations    AuthorizationRequest[]
 
   @@index([name])
 }
@@ -124,36 +127,38 @@ model Branch {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  registers    Register[]
-  employees    EmployeeAssignment[]
-  products     BranchProduct[]
-  inventory    InventoryBalance[]
-  movements    InventoryMovement[]
-  purchases    Purchase[]
-  sales        Sale[]
-  orders       Order[]
-  transformations Transformation[]
-  auditLogs    AuditLog[]
-  taxRules TaxRule[]
-  inventoryPolicies InventoryPolicy[]
-  pricingPolicies PricingPolicy[]
-  authorizations AuthorizationRequest[]
+  organization       Organization           @relation(fields: [organizationId], references: [id])
+  registers          Register[]
+  employees          EmployeeAssignment[]
+  products           BranchProduct[]
+  inventory          InventoryBalance[]
+  movements          InventoryMovement[]
+  purchases          Purchase[]
+  sales              Sale[]
+  orders             Order[]
+  transformations    Transformation[]
+  auditLogs          AuditLog[]
+  taxRules           TaxRule[]
+  inventoryPolicies  InventoryPolicy[]
+  pricingPolicies    PricingPolicy[]
+  authorizations     AuthorizationRequest[]
+  userBranchAccesses UserBranchAccess[]
+  productPrices      ProductPrice[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
 }
 
 model Register {
-  id        String @id @default(uuid()) @db.Uuid
-  branchId  String @db.Uuid
+  id        String         @id @default(uuid()) @db.Uuid
+  branchId  String         @db.Uuid
   name      String
   code      String
   status    RegisterStatus @default(CLOSED)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 
-  branch   Branch @relation(fields: [branchId], references: [id])
+  branch   Branch            @relation(fields: [branchId], references: [id])
   sessions RegisterSession[]
 
   @@unique([branchId, code])
@@ -161,19 +166,19 @@ model Register {
 }
 
 model RegisterSession {
-  id           String @id @default(uuid()) @db.Uuid
-  registerId   String @db.Uuid
-  openedById   String @db.Uuid
-  closedById   String? @db.Uuid
-  openedAt     DateTime @default(now())
+  id           String    @id @default(uuid()) @db.Uuid
+  registerId   String    @db.Uuid
+  openedById   String    @db.Uuid
+  closedById   String?   @db.Uuid
+  openedAt     DateTime  @default(now())
   closedAt     DateTime?
-  openingFloat Decimal  @db.Decimal(14, 2)
-  closingTotal Decimal? @db.Decimal(14, 2)
+  openingFloat Decimal   @db.Decimal(14, 2)
+  closingTotal Decimal?  @db.Decimal(14, 2)
 
   register Register @relation(fields: [registerId], references: [id])
-  openedBy User @relation("RegisterOpenedBy", fields: [openedById], references: [id])
-  closedBy User? @relation("RegisterClosedBy", fields: [closedById], references: [id])
-  sales Sale[]
+  openedBy User     @relation("RegisterOpenedBy", fields: [openedById], references: [id])
+  closedBy User?    @relation("RegisterClosedBy", fields: [closedById], references: [id])
+  sales    Sale[]
 
   @@index([registerId, openedAt])
 }
@@ -187,18 +192,18 @@ model User {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  roles        UserRole[]
-  branchAccess UserBranchAccess[]
-  openedSessions RegisterSession[] @relation("RegisterOpenedBy")
-  closedSessions RegisterSession[] @relation("RegisterClosedBy")
-  salesAsCashier Sale[] @relation("SaleCashier")
-  salesAsSeller  Sale[] @relation("SaleSeller")
-  movements     InventoryMovement[]
-  auditLogs     AuditLog[]
-  ordersPrepared Order[] @relation("OrderPreparedBy")
-  transformations Transformation[]
-  authorizationRequests AuthorizationRequest[] @relation("AuthorizationRequester")
+  organization           Organization            @relation(fields: [organizationId], references: [id])
+  roles                  UserRole[]
+  branchAccess           UserBranchAccess[]
+  openedSessions         RegisterSession[]       @relation("RegisterOpenedBy")
+  closedSessions         RegisterSession[]       @relation("RegisterClosedBy")
+  salesAsCashier         Sale[]                  @relation("SaleCashier")
+  salesAsSeller          Sale[]                  @relation("SaleSeller")
+  movements              InventoryMovement[]
+  auditLogs              AuditLog[]
+  ordersPrepared         Order[]                 @relation("OrderPreparedBy")
+  transformations        Transformation[]
+  authorizationRequests  AuthorizationRequest[]  @relation("AuthorizationRequester")
   authorizationApprovals AuthorizationApproval[]
 
   @@unique([organizationId, email])
@@ -206,7 +211,7 @@ model User {
 }
 
 model Role {
-  id          String @id @default(uuid()) @db.Uuid
+  id          String  @id @default(uuid()) @db.Uuid
   name        String
   description String?
 
@@ -217,8 +222,8 @@ model Role {
 }
 
 model Permission {
-  id          String @id @default(uuid()) @db.Uuid
-  code        String @unique
+  id          String  @id @default(uuid()) @db.Uuid
+  code        String  @unique
   description String?
 
   roles RolePermission[]
@@ -263,9 +268,9 @@ model Employee {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  assignments  EmployeeAssignment[]
-  movements    InventoryMovement[]
+  organization    Organization         @relation(fields: [organizationId], references: [id])
+  assignments     EmployeeAssignment[]
+  movements       InventoryMovement[]
   transformations Transformation[]
 
   @@unique([organizationId, employeeNumber])
@@ -273,9 +278,9 @@ model Employee {
 }
 
 model EmployeeAssignment {
-  id         String   @id @default(uuid()) @db.Uuid
-  employeeId String   @db.Uuid
-  branchId   String   @db.Uuid
+  id         String    @id @default(uuid()) @db.Uuid
+  employeeId String    @db.Uuid
+  branchId   String    @db.Uuid
   position   String
   startsAt   DateTime
   endsAt     DateTime?
@@ -298,45 +303,46 @@ model Category {
 }
 
 model UnitOfMeasure {
-  id      String @id @default(uuid()) @db.Uuid
-  code    String @unique
-  name    String
-  symbol  String
+  id       String    @id @default(uuid()) @db.Uuid
+  code     String    @unique
+  name     String
+  symbol   String
   products Product[]
 }
 
 model Product {
-  id               String @id @default(uuid()) @db.Uuid
-  organizationId   String @db.Uuid
-  categoryId       String @db.Uuid
-  unitOfMeasureId  String @db.Uuid
-  sku              String
-  name             String
-  status           ProductStatus @default(ACTIVE)
-  barcode          String?
-  targetMargin     Decimal? @db.Decimal(7, 4)
-  publicPrice      Decimal? @db.Decimal(14, 2)
-  archivedAt       DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id              String        @id @default(uuid()) @db.Uuid
+  organizationId  String        @db.Uuid
+  categoryId      String        @db.Uuid
+  unitOfMeasureId String        @db.Uuid
+  sku             String
+  name            String
+  status          ProductStatus @default(ACTIVE)
+  barcode         String?
+  targetMargin    Decimal?      @db.Decimal(7, 4)
+  publicPrice     Decimal?      @db.Decimal(14, 2)
+  archivedAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  category Category @relation(fields: [categoryId], references: [id])
-  unitOfMeasure UnitOfMeasure @relation(fields: [unitOfMeasureId], references: [id])
-  images ProductImage[]
-  labels ProductLabel[]
-  costs ProductCost[]
-  prices ProductPrice[]
-  branchProducts BranchProduct[]
-  inventory InventoryBalance[]
-  movements InventoryMovement[]
-  purchaseItems PurchaseItem[]
-  saleItems SaleItem[]
-  transformationInputs TransformationInput[]
+  organization          Organization           @relation(fields: [organizationId], references: [id])
+  category              Category               @relation(fields: [categoryId], references: [id])
+  unitOfMeasure         UnitOfMeasure          @relation(fields: [unitOfMeasureId], references: [id])
+  images                ProductImage[]
+  labels                ProductLabel[]
+  costs                 ProductCost[]
+  prices                ProductPrice[]
+  branchProducts        BranchProduct[]
+  inventory             InventoryBalance[]
+  movements             InventoryMovement[]
+  purchaseItems         PurchaseItem[]
+  saleItems             SaleItem[]
+  transformationInputs  TransformationInput[]
   transformationOutputs TransformationOutput[]
-  taxAssignments ProductTax[]
-  inventoryPolicies InventoryPolicy[]
-  pricingPolicies PricingPolicy[]
+  taxAssignments        ProductTax[]
+  inventoryPolicies     InventoryPolicy[]
+  pricingPolicies       PricingPolicy[]
+  orderItems            OrderItem[]
 
   @@unique([organizationId, sku])
   @@index([organizationId, categoryId])
@@ -344,11 +350,11 @@ model Product {
 }
 
 model ProductImage {
-  id        String @id @default(uuid()) @db.Uuid
-  productId String @db.Uuid
+  id        String   @id @default(uuid()) @db.Uuid
+  productId String   @db.Uuid
   url       String
   altText   String?
-  isPrimary Boolean @default(false)
+  isPrimary Boolean  @default(false)
   createdAt DateTime @default(now())
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -357,8 +363,8 @@ model ProductImage {
 }
 
 model ProductLabel {
-  id        String @id @default(uuid()) @db.Uuid
-  productId String @db.Uuid
+  id        String   @id @default(uuid()) @db.Uuid
+  productId String   @db.Uuid
   template  String
   data      Json
   createdAt DateTime @default(now())
@@ -370,8 +376,8 @@ model ProductLabel {
 }
 
 model BranchProduct {
-  branchId  String @db.Uuid
-  productId String @db.Uuid
+  branchId  String  @db.Uuid
+  productId String  @db.Uuid
   isEnabled Boolean @default(true)
 
   branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
@@ -381,12 +387,12 @@ model BranchProduct {
 }
 
 model ProductCost {
-  id         String   @id @default(uuid()) @db.Uuid
-  productId  String   @db.Uuid
-  cost       Decimal  @db.Decimal(14, 4)
-  source     String?
+  id          String   @id @default(uuid()) @db.Uuid
+  productId   String   @db.Uuid
+  cost        Decimal  @db.Decimal(14, 4)
+  source      String?
   effectiveAt DateTime
-  createdAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
 
   product Product @relation(fields: [productId], references: [id])
 
@@ -394,12 +400,12 @@ model ProductCost {
 }
 
 model ProductPrice {
-  id         String   @id @default(uuid()) @db.Uuid
-  productId  String   @db.Uuid
-  branchId   String?  @db.Uuid
-  price      Decimal  @db.Decimal(14, 2)
+  id          String   @id @default(uuid()) @db.Uuid
+  productId   String   @db.Uuid
+  branchId    String?  @db.Uuid
+  price       Decimal  @db.Decimal(14, 2)
   effectiveAt DateTime
-  createdAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
 
   product Product @relation(fields: [productId], references: [id])
   branch  Branch? @relation(fields: [branchId], references: [id])
@@ -408,8 +414,8 @@ model ProductPrice {
 }
 
 model Supplier {
-  id             String @id @default(uuid()) @db.Uuid
-  organizationId String @db.Uuid
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
   name           String
   taxId          String?
   phone          String?
@@ -418,7 +424,7 @@ model Supplier {
   updatedAt      DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
-  purchases Purchase[]
+  purchases    Purchase[]
 
   @@index([organizationId, name])
 }
@@ -431,8 +437,8 @@ model Purchase {
   purchasedAt DateTime
   createdAt   DateTime @default(now())
 
-  branch   Branch   @relation(fields: [branchId], references: [id])
-  supplier Supplier @relation(fields: [supplierId], references: [id])
+  branch   Branch         @relation(fields: [branchId], references: [id])
+  supplier Supplier       @relation(fields: [supplierId], references: [id])
   items    PurchaseItem[]
 
   @@unique([branchId, folio])
@@ -440,11 +446,11 @@ model Purchase {
 }
 
 model PurchaseItem {
-  id         String  @id @default(uuid()) @db.Uuid
-  purchaseId String  @db.Uuid
-  productId  String  @db.Uuid
-  quantity   Decimal @db.Decimal(14, 4)
-  unitCost   Decimal @db.Decimal(14, 4)
+  id         String   @id @default(uuid()) @db.Uuid
+  purchaseId String   @db.Uuid
+  productId  String   @db.Uuid
+  quantity   Decimal  @db.Decimal(14, 4)
+  unitCost   Decimal  @db.Decimal(14, 4)
   taxRate    Decimal? @db.Decimal(7, 4)
 
   purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
@@ -455,10 +461,10 @@ model PurchaseItem {
 }
 
 model InventoryBalance {
-  id        String  @id @default(uuid()) @db.Uuid
-  branchId  String  @db.Uuid
-  productId String  @db.Uuid
-  quantity  Decimal @db.Decimal(14, 4)
+  id        String   @id @default(uuid()) @db.Uuid
+  branchId  String   @db.Uuid
+  productId String   @db.Uuid
+  quantity  Decimal  @db.Decimal(14, 4)
   updatedAt DateTime @updatedAt
 
   branch  Branch  @relation(fields: [branchId], references: [id], onDelete: Cascade)
@@ -468,23 +474,23 @@ model InventoryBalance {
 }
 
 model InventoryMovement {
-  id             String @id @default(uuid()) @db.Uuid
-  branchId       String @db.Uuid
-  productId      String @db.Uuid
-  type           InventoryMovementType
-  quantity       Decimal @db.Decimal(14, 4)
-  unitCost       Decimal? @db.Decimal(14, 4)
-  referenceType  String?
-  referenceId    String? @db.Uuid
-  userId         String? @db.Uuid
-  employeeId     String? @db.Uuid
-  occurredAt     DateTime
-  createdAt      DateTime @default(now())
-  notes          String?
+  id            String                @id @default(uuid()) @db.Uuid
+  branchId      String                @db.Uuid
+  productId     String                @db.Uuid
+  type          InventoryMovementType
+  quantity      Decimal               @db.Decimal(14, 4)
+  unitCost      Decimal?              @db.Decimal(14, 4)
+  referenceType String?
+  referenceId   String?               @db.Uuid
+  userId        String?               @db.Uuid
+  employeeId    String?               @db.Uuid
+  occurredAt    DateTime
+  createdAt     DateTime              @default(now())
+  notes         String?
 
-  branch   Branch   @relation(fields: [branchId], references: [id])
-  product  Product  @relation(fields: [productId], references: [id])
-  user     User?    @relation(fields: [userId], references: [id])
+  branch   Branch    @relation(fields: [branchId], references: [id])
+  product  Product   @relation(fields: [productId], references: [id])
+  user     User?     @relation(fields: [userId], references: [id])
   employee Employee? @relation(fields: [employeeId], references: [id])
 
   @@index([branchId, productId, occurredAt])
@@ -492,37 +498,37 @@ model InventoryMovement {
 }
 
 model Sale {
-  id             String @id @default(uuid()) @db.Uuid
-  branchId       String @db.Uuid
-  registerSessionId String @db.Uuid
-  cashierId      String @db.Uuid
-  sellerId       String? @db.Uuid
-  customerId     String? @db.Uuid
-  folio          String
-  status         SaleStatus @default(COMPLETED)
-  soldAt         DateTime
-  createdAt      DateTime @default(now())
+  id                String     @id @default(uuid()) @db.Uuid
+  branchId          String     @db.Uuid
+  registerSessionId String     @db.Uuid
+  cashierId         String     @db.Uuid
+  sellerId          String?    @db.Uuid
+  customerId        String?    @db.Uuid
+  folio             String
+  status            SaleStatus @default(COMPLETED)
+  soldAt            DateTime
+  createdAt         DateTime   @default(now())
 
-  branch Branch @relation(fields: [branchId], references: [id])
+  branch          Branch          @relation(fields: [branchId], references: [id])
   registerSession RegisterSession @relation(fields: [registerSessionId], references: [id])
-  cashier User @relation("SaleCashier", fields: [cashierId], references: [id])
-  seller User? @relation("SaleSeller", fields: [sellerId], references: [id])
-  customer Customer? @relation(fields: [customerId], references: [id])
-  items SaleItem[]
-  payments Payment[]
+  cashier         User            @relation("SaleCashier", fields: [cashierId], references: [id])
+  seller          User?           @relation("SaleSeller", fields: [sellerId], references: [id])
+  customer        Customer?       @relation(fields: [customerId], references: [id])
+  items           SaleItem[]
+  payments        Payment[]
 
   @@unique([branchId, folio])
   @@index([branchId, soldAt])
 }
 
 model SaleItem {
-  id           String  @id @default(uuid()) @db.Uuid
-  saleId       String  @db.Uuid
-  productId    String  @db.Uuid
+  id           String   @id @default(uuid()) @db.Uuid
+  saleId       String   @db.Uuid
+  productId    String   @db.Uuid
   productName  String
-  quantity     Decimal @db.Decimal(14, 4)
-  unitPrice    Decimal @db.Decimal(14, 4)
-  discount     Decimal @default(0) @db.Decimal(14, 2)
+  quantity     Decimal  @db.Decimal(14, 4)
+  unitPrice    Decimal  @db.Decimal(14, 4)
+  discount     Decimal  @default(0) @db.Decimal(14, 2)
   taxRate      Decimal? @db.Decimal(7, 4)
   costSnapshot Decimal? @db.Decimal(14, 4)
 
@@ -534,11 +540,11 @@ model SaleItem {
 }
 
 model Payment {
-  id        String @id @default(uuid()) @db.Uuid
-  saleId    String @db.Uuid
+  id        String        @id @default(uuid()) @db.Uuid
+  saleId    String        @db.Uuid
   method    PaymentMethod
-  amount    Decimal @db.Decimal(14, 2)
-  createdAt DateTime @default(now())
+  amount    Decimal       @db.Decimal(14, 2)
+  createdAt DateTime      @default(now())
 
   sale Sale @relation(fields: [saleId], references: [id], onDelete: Cascade)
 
@@ -546,8 +552,8 @@ model Payment {
 }
 
 model Customer {
-  id             String @id @default(uuid()) @db.Uuid
-  organizationId String @db.Uuid
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
   name           String
   phone          String?
   email          String?
@@ -556,38 +562,38 @@ model Customer {
   updatedAt      DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id])
-  sales Sale[]
-  orders Order[]
+  sales        Sale[]
+  orders       Order[]
 
   @@index([organizationId, phone])
 }
 
 model Order {
-  id            String @id @default(uuid()) @db.Uuid
-  branchId      String @db.Uuid
-  customerId    String? @db.Uuid
-  channel       OrderChannel
-  status        OrderStatus @default(RECEIVED)
-  requestedAt   DateTime?
-  preparedById  String? @db.Uuid
-  saleId        String? @db.Uuid
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String       @id @default(uuid()) @db.Uuid
+  branchId     String       @db.Uuid
+  customerId   String?      @db.Uuid
+  channel      OrderChannel
+  status       OrderStatus  @default(RECEIVED)
+  requestedAt  DateTime?
+  preparedById String?      @db.Uuid
+  saleId       String?      @db.Uuid
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
-  branch Branch @relation(fields: [branchId], references: [id])
-  customer Customer? @relation(fields: [customerId], references: [id])
-  preparedBy User? @relation("OrderPreparedBy", fields: [preparedById], references: [id])
-  items OrderItem[]
+  branch     Branch      @relation(fields: [branchId], references: [id])
+  customer   Customer?   @relation(fields: [customerId], references: [id])
+  preparedBy User?       @relation("OrderPreparedBy", fields: [preparedById], references: [id])
+  items      OrderItem[]
 
   @@index([branchId, status, requestedAt])
   @@index([customerId])
 }
 
 model OrderItem {
-  id        String @id @default(uuid()) @db.Uuid
-  orderId  String @db.Uuid
-  productId String @db.Uuid
-  quantity Decimal @db.Decimal(14, 4)
+  id        String   @id @default(uuid()) @db.Uuid
+  orderId   String   @db.Uuid
+  productId String   @db.Uuid
+  quantity  Decimal  @db.Decimal(14, 4)
   unitPrice Decimal? @db.Decimal(14, 4)
 
   order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -597,141 +603,146 @@ model OrderItem {
 }
 
 model Transformation {
-  id         String @id @default(uuid()) @db.Uuid
-  branchId   String @db.Uuid
-  userId     String? @db.Uuid
-  employeeId String? @db.Uuid
+  id         String   @id @default(uuid()) @db.Uuid
+  branchId   String   @db.Uuid
+  userId     String?  @db.Uuid
+  employeeId String?  @db.Uuid
   occurredAt DateTime
   notes      String?
   createdAt  DateTime @default(now())
 
-  branch   Branch @relation(fields: [branchId], references: [id])
-  user     User? @relation(fields: [userId], references: [id])
-  employee Employee? @relation(fields: [employeeId], references: [id])
-  inputs  TransformationInput[]
-  outputs TransformationOutput[]
+  branch   Branch                 @relation(fields: [branchId], references: [id])
+  user     User?                  @relation(fields: [userId], references: [id])
+  employee Employee?              @relation(fields: [employeeId], references: [id])
+  inputs   TransformationInput[]
+  outputs  TransformationOutput[]
 
   @@index([branchId, occurredAt])
 }
 
 model TransformationInput {
-  id             String @id @default(uuid()) @db.Uuid
-  transformationId String @db.Uuid
-  productId      String @db.Uuid
-  quantity       Decimal @db.Decimal(14, 4)
+  id               String  @id @default(uuid()) @db.Uuid
+  transformationId String  @db.Uuid
+  productId        String  @db.Uuid
+  quantity         Decimal @db.Decimal(14, 4)
 
   transformation Transformation @relation(fields: [transformationId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id])
+  product        Product        @relation(fields: [productId], references: [id])
 
   @@index([transformationId])
 }
 
 model TransformationOutput {
-  id             String @id @default(uuid()) @db.Uuid
-  transformationId String @db.Uuid
-  productId      String @db.Uuid
-  quantity       Decimal @db.Decimal(14, 4)
+  id               String  @id @default(uuid()) @db.Uuid
+  transformationId String  @db.Uuid
+  productId        String  @db.Uuid
+  quantity         Decimal @db.Decimal(14, 4)
 
   transformation Transformation @relation(fields: [transformationId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id])
+  product        Product        @relation(fields: [productId], references: [id])
 
   @@index([transformationId])
 }
 
-
 model PricingPolicy {
-  id String @id @default(uuid()) @db.Uuid
-  organizationId String @db.Uuid
-  branchId String? @db.Uuid
-  productId String? @db.Uuid
-  name String
-  targetMargin Decimal @db.Decimal(7,4)
-  expectedWasteRate Decimal @default(0) @db.Decimal(7,4)
-  expectedShrinkageRate Decimal @default(0) @db.Decimal(7,4)
-  minMargin Decimal? @db.Decimal(7,4)
-  maxMargin Decimal? @db.Decimal(7,4)
-  isActive Boolean @default(true)
-  organization Organization @relation(fields:[organizationId], references:[id])
-  branch Branch? @relation(fields:[branchId], references:[id])
-  product Product? @relation(fields:[productId], references:[id])
+  id                    String       @id @default(uuid()) @db.Uuid
+  organizationId        String       @db.Uuid
+  branchId              String?      @db.Uuid
+  productId             String?      @db.Uuid
+  name                  String
+  targetMargin          Decimal      @db.Decimal(7, 4)
+  expectedWasteRate     Decimal      @default(0) @db.Decimal(7, 4)
+  expectedShrinkageRate Decimal      @default(0) @db.Decimal(7, 4)
+  minMargin             Decimal?     @db.Decimal(7, 4)
+  maxMargin             Decimal?     @db.Decimal(7, 4)
+  isActive              Boolean      @default(true)
+  organization          Organization @relation(fields: [organizationId], references: [id])
+  branch                Branch?      @relation(fields: [branchId], references: [id])
+  product               Product?     @relation(fields: [productId], references: [id])
+
   @@index([organizationId, branchId, productId, isActive])
 }
 
 model TaxRule {
-  id String @id @default(uuid()) @db.Uuid
-  organizationId String @db.Uuid
-  branchId String? @db.Uuid
-  name String
-  type TaxType
-  treatment TaxTreatment
-  rate Decimal @db.Decimal(7,4)
-  validFrom DateTime
-  validTo DateTime?
-  isActive Boolean @default(true)
-  organization Organization @relation(fields:[organizationId], references:[id])
-  branch Branch? @relation(fields:[branchId], references:[id])
-  products ProductTax[]
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  branchId       String?      @db.Uuid
+  name           String
+  type           TaxType
+  treatment      TaxTreatment
+  rate           Decimal      @db.Decimal(7, 4)
+  validFrom      DateTime
+  validTo        DateTime?
+  isActive       Boolean      @default(true)
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  branch         Branch?      @relation(fields: [branchId], references: [id])
+  products       ProductTax[]
+
   @@index([organizationId, branchId, type, isActive])
 }
 
 model ProductTax {
-  productId String @db.Uuid
-  taxRuleId String @db.Uuid
-  product Product @relation(fields:[productId], references:[id], onDelete:Cascade)
-  taxRule TaxRule @relation(fields:[taxRuleId], references:[id], onDelete:Cascade)
+  productId String  @db.Uuid
+  taxRuleId String  @db.Uuid
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  taxRule   TaxRule @relation(fields: [taxRuleId], references: [id], onDelete: Cascade)
+
   @@id([productId, taxRuleId])
 }
 
 model InventoryPolicy {
-  id String @id @default(uuid()) @db.Uuid
-  organizationId String @db.Uuid
-  branchId String @db.Uuid
-  productId String @db.Uuid
-  minimumStock Decimal @default(0) @db.Decimal(14,4)
-  maximumStock Decimal? @db.Decimal(14,4)
-  reorderPoint Decimal @default(0) @db.Decimal(14,4)
-  targetDaysCoverage Decimal? @db.Decimal(7,2)
-  expectedWasteRate Decimal @default(0) @db.Decimal(7,4)
-  expectedShrinkageRate Decimal @default(0) @db.Decimal(7,4)
-  isActive Boolean @default(true)
-  organization Organization @relation(fields:[organizationId], references:[id])
-  branch Branch @relation(fields:[branchId], references:[id])
-  product Product @relation(fields:[productId], references:[id])
+  id                    String       @id @default(uuid()) @db.Uuid
+  organizationId        String       @db.Uuid
+  branchId              String       @db.Uuid
+  productId             String       @db.Uuid
+  minimumStock          Decimal      @default(0) @db.Decimal(14, 4)
+  maximumStock          Decimal?     @db.Decimal(14, 4)
+  reorderPoint          Decimal      @default(0) @db.Decimal(14, 4)
+  targetDaysCoverage    Decimal?     @db.Decimal(7, 2)
+  expectedWasteRate     Decimal      @default(0) @db.Decimal(7, 4)
+  expectedShrinkageRate Decimal      @default(0) @db.Decimal(7, 4)
+  isActive              Boolean      @default(true)
+  organization          Organization @relation(fields: [organizationId], references: [id])
+  branch                Branch       @relation(fields: [branchId], references: [id])
+  product               Product      @relation(fields: [productId], references: [id])
+
   @@unique([branchId, productId])
   @@index([organizationId, branchId, reorderPoint])
 }
 
 model AuthorizationRequest {
-  id String @id @default(uuid()) @db.Uuid
-  organizationId String @db.Uuid
-  branchId String? @db.Uuid
-  requestedById String @db.Uuid
-  type AuthorizationType
-  status AuthorizationStatus @default(PENDING)
-  reason String
-  entityType String
-  entityId String? @db.Uuid
-  beforeData Json?
-  requestedData Json?
-  requestedAt DateTime @default(now())
-  resolvedAt DateTime?
-  organization Organization @relation(fields:[organizationId], references:[id])
-  branch Branch? @relation(fields:[branchId], references:[id])
-  requestedBy User @relation("AuthorizationRequester", fields:[requestedById], references:[id])
-  approvals AuthorizationApproval[]
+  id             String                  @id @default(uuid()) @db.Uuid
+  organizationId String                  @db.Uuid
+  branchId       String?                 @db.Uuid
+  requestedById  String                  @db.Uuid
+  type           AuthorizationType
+  status         AuthorizationStatus     @default(PENDING)
+  reason         String
+  entityType     String
+  entityId       String?                 @db.Uuid
+  beforeData     Json?
+  requestedData  Json?
+  requestedAt    DateTime                @default(now())
+  resolvedAt     DateTime?
+  organization   Organization            @relation(fields: [organizationId], references: [id])
+  branch         Branch?                 @relation(fields: [branchId], references: [id])
+  requestedBy    User                    @relation("AuthorizationRequester", fields: [requestedById], references: [id])
+  approvals      AuthorizationApproval[]
+
   @@index([organizationId, requestedAt])
   @@index([branchId])
 }
 
 model AuthorizationApproval {
-  id String @id @default(uuid()) @db.Uuid
-  authorizationRequestId String @db.Uuid
-  approverId String @db.Uuid
-  approvedAt DateTime @default(now())
-  decision AuthorizationStatus
-  notes String?
-  request AuthorizationRequest @relation(fields:[authorizationRequestId], references:[id], onDelete:Cascade)
-  approver User @relation(fields:[approverId], references:[id])
+  id                     String               @id @default(uuid()) @db.Uuid
+  authorizationRequestId String               @db.Uuid
+  approverId             String               @db.Uuid
+  approvedAt             DateTime             @default(now())
+  decision               AuthorizationStatus
+  notes                  String?
+  request                AuthorizationRequest @relation(fields: [authorizationRequestId], references: [id], onDelete: Cascade)
+  approver               User                 @relation(fields: [approverId], references: [id])
+
   @@index([authorizationRequestId, approvedAt])
 }
 
@@ -748,8 +759,8 @@ model AuditLog {
   occurredAt     DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id])
-  branch Branch? @relation(fields: [branchId], references: [id])
-  user User? @relation(fields: [userId], references: [id])
+  branch       Branch?      @relation(fields: [branchId], references: [id])
+  user         User?        @relation(fields: [userId], references: [id])
 
   @@index([organizationId, occurredAt])
   @@index([branchId, occurredAt])
