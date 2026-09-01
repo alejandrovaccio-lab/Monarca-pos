@@ -7,10 +7,37 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum TaxType { IVA IEPS OTHER }
-enum TaxTreatment { EXEMPT ZERO_RATE TAXABLE }
-enum AuthorizationStatus { PENDING APPROVED REJECTED CANCELLED }
-enum AuthorizationType { PRICE_CHANGE MARGIN_CHANGE DISCOUNT_EXCEPTION SALE_CANCEL SALE_REFUND INVENTORY_ADJUSTMENT WASTE_EXCEPTION SHRINKAGE_EXCEPTION COST_CHANGE TAX_CHANGE REGISTER_EXCEPTION ACCESS_CHANGE OTHER }
+enum TaxType {
+  IVA
+  IEPS
+  OTHER
+}
+enum TaxTreatment {
+  EXEMPT
+  ZERO_RATE
+  TAXABLE
+}
+enum AuthorizationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+enum AuthorizationType {
+  PRICE_CHANGE
+  MARGIN_CHANGE
+  DISCOUNT_EXCEPTION
+  SALE_CANCEL
+  SALE_REFUND
+  INVENTORY_ADJUSTMENT
+  WASTE_EXCEPTION
+  SHRINKAGE_EXCEPTION
+  COST_CHANGE
+  TAX_CHANGE
+  REGISTER_EXCEPTION
+  ACCESS_CHANGE
+  OTHER
+}
 
 enum UserStatus {
   ACTIVE
@@ -692,8 +719,8 @@ model AuthorizationRequest {
   branch Branch? @relation(fields:[branchId], references:[id])
   requestedBy User @relation("AuthorizationRequester", fields:[requestedById], references:[id])
   approvals AuthorizationApproval[]
-  @@index([organizationId, status, requestedAt])
-  @@index([branchId, status])
+  @@index([organizationId, requestedAt])
+  @@index([branchId])
 }
 
 model AuthorizationApproval {
