@@ -44,7 +44,7 @@ jobs:
         run: |
           mkdir -p prisma/migrations/0002_v1_0_1_auth_sessions
           npx prisma migrate diff \
-            --from-empty \
+            --from-url "$DATABASE_URL" \
             --to-schema-datamodel prisma/schema.prisma \
             --script > prisma/migrations/0002_v1_0_1_auth_sessions/migration.sql
       - name: Verify migration SQL
