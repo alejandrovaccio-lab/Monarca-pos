@@ -1,11 +1,4 @@
-export const AUTHORIZATION_ROLES = [
-  "CAJERO",
-  "ENCARGADO_TIENDA",
-  "GERENTE",
-  "ADMINISTRADOR"
-] as const;
-
-export type AuthorizationRole = (typeof AUTHORIZATION_ROLES)[number];
+import { canExecuteSensitiveChange, type MonarcaRole } from "./permissions";
 
 export type AuthorizationRequest = {
   type: string;
@@ -14,6 +7,6 @@ export type AuthorizationRequest = {
   branchId: string;
 };
 
-export function requiresAuthorization(role: AuthorizationRole, sensitiveChange: boolean): boolean {
-  return sensitiveChange && role === "CAJERO";
+export function authorizeSensitiveChange(role: MonarcaRole): boolean {
+  return canExecuteSensitiveChange(role);
 }
