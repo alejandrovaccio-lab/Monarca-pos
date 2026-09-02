@@ -12,33 +12,33 @@ jobs:
     env:
       DATABASE_URL: postgresql://monarca:monarca@localhost:5432/monarca_pos
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: monarca_pos
+          POSTGRES_USER: monarca
+          POSTGRES_PASSWORD: monarca
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U monarca -d monarca_pos"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - name: Install dependencies
         run: npm install
-
-      - name: Generate Prisma client
+      - name: Prisma generate
         run: npx prisma generate
-
-      - name: Generate v1.0.0 migration
-        run: |
-          mkdir -p prisma/migrations/0001_v1_0_0
-          npx prisma migrate diff             --from-empty             --to-schema-datamodel prisma/schema.prisma             --script > prisma/migrations/0001_v1_0_0/migration.sql
-
-      - name: Verify generated migration is not empty
-        run: test -s prisma/migrations/0001_v1_0_0/migration.sql
-
-      - name: Commit migration
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add prisma/migrations/0001_v1_0_0/migration.sql
-          git diff --cached --quiet && echo "Migration already committed." || git commit -m "db: add Prisma migration v1.0.0"
-          git push
+      - name: Apply migration
+        run: npx prisma migrate deploy
+      - name: Verify database
+        run: npx prisma migrate status
