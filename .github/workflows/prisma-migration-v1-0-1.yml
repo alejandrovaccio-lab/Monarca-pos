@@ -1,0 +1,59 @@
+name: Prisma Migration v1.0.1
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migration:
+    name: Generate and verify v1.0.1
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      DATABASE_URL: postgresql://monarca:monarca@localhost:5432/monarca_pos
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: monarca_pos
+          POSTGRES_USER: monarca
+          POSTGRES_PASSWORD: monarca
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U monarca -d monarca_pos"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Validate schema
+        run: npx prisma validate
+      - name: Apply existing migrations
+        run: npx prisma migrate deploy
+      - name: Generate v1.0.1 SQL
+        run: |
+          mkdir -p prisma/migrations/0002_v1_0_1_auth_sessions
+          npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --script > prisma/migrations/0002_v1_0_1_auth_sessions/migration.sql
+      - name: Verify migration SQL
+        run: test -s prisma/migrations/0002_v1_0_1_auth_sessions/migration.sql
+      - name: Apply all migrations
+        run: npx prisma migrate deploy
+      - name: Verify migration state
+        run: npx prisma migrate status
+      - name: Commit migration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add prisma/migrations/0002_v1_0_1_auth_sessions/migration.sql
+          git diff --cached --quiet || git commit -m "db: add Prisma migration v1.0.1 for authentication sessions"
+          git push
