@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: monarca-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: monarca_pos
+      POSTGRES_USER: monarca
+      POSTGRES_PASSWORD: monarca_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - monarca_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monarca -d monarca_pos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  monarca_postgres_data:
