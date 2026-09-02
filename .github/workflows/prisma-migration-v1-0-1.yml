@@ -40,15 +40,6 @@ jobs:
         run: npx prisma validate
       - name: Apply existing migrations
         run: npx prisma migrate deploy
-      - name: Generate v1.0.1 SQL
-        run: |
-          mkdir -p prisma/migrations/0002_v1_0_1_auth_sessions
-          npx prisma migrate diff \
-            --from-url "$DATABASE_URL" \
-            --to-schema-datamodel prisma/schema.prisma \
-            --script > prisma/migrations/0002_v1_0_1_auth_sessions/migration.sql
-      - name: Verify migration SQL
-        run: test -s prisma/migrations/0002_v1_0_1_auth_sessions/migration.sql
       - name: Apply all migrations
         run: npx prisma migrate deploy
       - name: Verify migration state
