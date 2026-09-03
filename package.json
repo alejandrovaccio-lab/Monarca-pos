@@ -10,7 +10,8 @@
     "password:hash": "tsx scripts/hash-password.ts",
     "validate": "prisma validate && prisma generate && tsc --noEmit",
     "start": "tsx src/server.ts",
-    "dev": "tsx watch src/server.ts"
+    "dev": "tsx watch src/server.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@prisma/client": "^6.15.0",
@@ -20,7 +21,8 @@
     "prisma": "^6.15.0",
     "typescript": "^5.9.2",
     "@types/node": "^24.3.0",
-    "tsx": "^4.20.3"
+    "tsx": "^4.20.3",
+    "vitest": "^3.2.4"
   },
   "engines": {
     "node": ">=22"
