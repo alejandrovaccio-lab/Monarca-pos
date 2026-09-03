@@ -31,8 +31,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm install --no-audit --no-fund
+      - name: Install dependencies and regenerate lockfile
+        run: npm install --no-audit --no-fund
+      - name: Verify reproducible npm install
+        run: npm ci --no-audit --no-fund
       - run: npx prisma validate
       - run: npx prisma generate
       - run: npx prisma migrate deploy
