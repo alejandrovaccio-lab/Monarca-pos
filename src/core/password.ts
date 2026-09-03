@@ -1,18 +1,18 @@
-import { argon2id } from "@node-rs/argon2";
+import { Algorithm, hash, verify } from "@node-rs/argon2";
 
 const OPTIONS = {
   memoryCost: 19456,
   timeCost: 2,
-  parallelism: 1
+  parallelism: 1,
+  outputLen: 32,
+  algorithm: Algorithm.Argon2id,
 };
 
-export async function hashPassword(password: string): Promise<string> {
-  if (password.length < 10) {
-    throw new Error("Password must contain at least 10 characters.");
-  }
-  return argon2id.hash(password, OPTIONS);
+export async function hashPassword(password: string) {
+  if (password.length < 10) throw new Error("Password must contain at least 10 characters.");
+  return hash(password, OPTIONS);
 }
 
-export async function verifyPassword(hash: string, password: string): Promise<boolean> {
-  return argon2id.verify(hash, password);
+export async function verifyPassword(storedHash: string, password: string) {
+  return verify(storedHash, password);
 }
