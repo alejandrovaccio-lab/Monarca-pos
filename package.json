@@ -8,7 +8,9 @@
     "prisma:validate": "prisma validate",
     "prisma:generate": "prisma generate",
     "password:hash": "tsx scripts/hash-password.ts",
-    "validate": "prisma validate && prisma generate && tsc --noEmit"
+    "validate": "prisma validate && prisma generate && tsc --noEmit",
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.15.0",
