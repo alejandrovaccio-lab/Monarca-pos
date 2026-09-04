@@ -66,10 +66,12 @@ export async function executeApprovedSaleChange(input: {
     if (sale.branchId !== authorization.branchId) throw new Error("AUTHORIZATION_BRANCH_INVALID");
     if (sale.status !== "COMPLETED") throw new Error("SALE_ALREADY_CHANGED");
 
+    const status = targetStatus as "CANCELLED" | "REFUNDED";
+
     // Conditional update makes execution single-use even under concurrent requests.
     const changed = await tx.sale.updateMany({
       where: { id: sale.id, status: "COMPLETED" },
-      data: { status: targetStatus },
+      data: { status },
     });
     if (changed.count !== 1) throw new Error("SALE_ALREADY_CHANGED");
 
@@ -87,11 +89,11 @@ export async function executeApprovedSaleChange(input: {
           type: "ADJUSTMENT",
           quantity: item.quantity,
           unitCost: item.costSnapshot,
-          referenceType: targetStatus === "CANCELLED" ? "SALE_CANCEL" : "SALE_REFUND",
+          referenceType: status === "CANCELLED" ? "SALE_CANCEL" : "SALE_REFUND",
           referenceId: sale.id,
           userId: input.executorId,
           occurredAt: new Date(),
-          notes: `Reversión de inventario por ${targetStatus === "CANCELLED" ? "cancelación" : "devolución"} autorizada. Solicitud ${authorization.id}.`,
+          notes: `Reversión de inventario por ${status === "CANCELLED" ? "cancelación" : "devolución"} autorizada. Solicitud ${authorization.id}.`,
         },
       });
     }
@@ -101,7 +103,7 @@ export async function executeApprovedSaleChange(input: {
         organizationId: authorization.organizationId,
         branchId: authorization.branchId,
         userId: input.executorId,
-        action: `SALE_${targetStatus}`,
+        action: `SALE_${status}`,
         entityType: "Sale",
         entityId: sale.id,
         beforeData: {
@@ -111,14 +113,14 @@ export async function executeApprovedSaleChange(input: {
         },
         afterData: {
           id: sale.id,
-          status: targetStatus,
+          status,
           authorizationRequestId: authorization.id,
           inventoryRestored: true,
         },
       },
     });
 
-    return { ...sale, status: targetStatus };
+    return { ...sale, status };
   });
 }
 
