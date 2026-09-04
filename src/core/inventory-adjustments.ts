@@ -110,23 +110,36 @@ export async function executeApprovedInventoryAdjustment(input: {
     unitCost?: number | null;
   } | null;
 
+  if (!requested) throw new Error("AUTHORIZATION_TARGET_INVALID");
+
+  const {
+    branchId,
+    productId,
+    employeeId,
+    adjustmentType,
+    quantity,
+    delta,
+    resultingQuantity,
+    unitCost,
+  } = requested;
+
   if (
-    requested?.branchId !== authorization.branchId ||
-    requested.productId !== authorization.entityId ||
-    !requested.employeeId ||
-    !requested.adjustmentType ||
-    typeof requested.quantity !== "number" ||
-    typeof requested.delta !== "number"
+    branchId !== authorization.branchId ||
+    productId !== authorization.entityId ||
+    !employeeId ||
+    !adjustmentType ||
+    typeof quantity !== "number" ||
+    typeof delta !== "number"
   ) {
     throw new Error("AUTHORIZATION_TARGET_INVALID");
   }
 
-  const expectedDelta = deltaFor(requested.adjustmentType, requested.quantity);
-  if (expectedDelta !== requested.delta) throw new Error("AUTHORIZATION_TARGET_INVALID");
+  const expectedDelta = deltaFor(adjustmentType, quantity);
+  if (expectedDelta !== delta) throw new Error("AUTHORIZATION_TARGET_INVALID");
 
   return prisma.$transaction(async (tx) => {
     const employee = await tx.employee.findUnique({
-      where: { id: requested.employeeId },
+      where: { id: employeeId },
       select: { organizationId: true },
     });
     if (!employee || employee.organizationId !== authorization.organizationId) {
@@ -142,10 +155,10 @@ export async function executeApprovedInventoryAdjustment(input: {
       },
     });
     const currentQuantity = Number(current?.quantity ?? 0);
-    const newQuantity = currentQuantity + requested.delta;
+    const newQuantity = currentQuantity + delta;
     if (newQuantity < 0) throw new Error("INVENTORY_NEGATIVE_NOT_ALLOWED");
 
-    if (requested.resultingQuantity !== undefined && Number(requested.resultingQuantity) !== newQuantity) {
+    if (resultingQuantity !== undefined && Number(resultingQuantity) !== newQuantity) {
       throw new Error("INVENTORY_CHANGED_SINCE_REQUEST");
     }
 
@@ -168,15 +181,15 @@ export async function executeApprovedInventoryAdjustment(input: {
       data: {
         branchId: authorization.branchId!,
         productId: authorization.entityId!,
-        type: MOVEMENT_TYPE[requested.adjustmentType],
-        quantity: requested.delta,
-        unitCost: requested.unitCost ?? null,
-        referenceType: `MANUAL_${requested.adjustmentType}`,
+        type: MOVEMENT_TYPE[adjustmentType],
+        quantity: delta,
+        unitCost: unitCost ?? null,
+        referenceType: `MANUAL_${adjustmentType}`,
         referenceId: authorization.id,
         userId: input.executorId,
-        employeeId: requested.employeeId,
+        employeeId,
         occurredAt: new Date(),
-        notes: `${requested.adjustmentType}: ${authorization.reason}`,
+        notes: `${adjustmentType}: ${authorization.reason}`,
       },
     });
 
@@ -185,7 +198,7 @@ export async function executeApprovedInventoryAdjustment(input: {
         organizationId: authorization.organizationId,
         branchId: authorization.branchId,
         userId: input.executorId,
-        action: `INVENTORY_${requested.adjustmentType}`,
+        action: `INVENTORY_${adjustmentType}`,
         entityType: "InventoryBalance",
         entityId: authorization.entityId,
         beforeData: {
@@ -194,8 +207,8 @@ export async function executeApprovedInventoryAdjustment(input: {
         },
         afterData: {
           quantity: newQuantity,
-          delta: requested.delta,
-          employeeId: requested.employeeId,
+          delta,
+          employeeId,
           authorizationRequestId: authorization.id,
         },
       },
@@ -206,8 +219,8 @@ export async function executeApprovedInventoryAdjustment(input: {
       productId: authorization.entityId,
       previousQuantity: currentQuantity,
       newQuantity,
-      delta: requested.delta,
-      adjustmentType: requested.adjustmentType,
+      delta,
+      adjustmentType,
     };
   });
 }
