@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { getMe, postLogin, postLogout, type LoginRequest } from "./auth";
-import { getInventory, getInventoryList, getInventoryMovements } from "./inventory-query";
+import { getInventory, getInventoryList, getInventoryMovements, getInventoryReplenishmentQuery } from "./inventory-query";
 
 const COOKIE_NAME = "monarca_session";
 
@@ -73,15 +73,27 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (method === "GET" && url.pathname === "/inventory") {
       const branchId = url.searchParams.get("branchId");
       const productId = url.searchParams.get("productId");
-      const result = branchId && productId
+      if (!branchId) { sendJson(response, 400, { error: "BRANCH_ID_REQUIRED" }); return; }
+      const result = productId
         ? await getInventory({ branchId, productId })
-        : await getInventoryList({ branchId: branchId ?? "", search: url.searchParams.get("search") ?? undefined, limit: queryNumber(url.searchParams.get("limit")) });
+        : await getInventoryList({ branchId, search: url.searchParams.get("search") ?? undefined, limit: queryNumber(url.searchParams.get("limit")) });
       sendJson(response, result.status, result.body); return;
     }
     if (method === "GET" && url.pathname === "/inventory/movements") {
       const branchId = url.searchParams.get("branchId");
       if (!branchId) { sendJson(response, 400, { error: "BRANCH_ID_REQUIRED" }); return; }
       const result = await getInventoryMovements({ branchId, productId: url.searchParams.get("productId") ?? undefined, limit: queryNumber(url.searchParams.get("limit")) });
+      sendJson(response, result.status, result.body); return;
+    }
+    if (method === "GET" && url.pathname === "/inventory/replenishment") {
+      const branchId = url.searchParams.get("branchId");
+      if (!branchId) { sendJson(response, 400, { error: "BRANCH_ID_REQUIRED" }); return; }
+      const result = await getInventoryReplenishmentQuery({
+        branchId,
+        productId: url.searchParams.get("productId") ?? undefined,
+        days: queryNumber(url.searchParams.get("days")),
+        limit: queryNumber(url.searchParams.get("limit")),
+      });
       sendJson(response, result.status, result.body); return;
     }
     if (method === "GET" && url.pathname === "/health") {
