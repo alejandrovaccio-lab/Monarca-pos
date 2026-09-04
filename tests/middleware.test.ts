@@ -9,10 +9,16 @@ vi.mock("../src/lib/prisma", () => ({
   }
 }));
 
+vi.mock("../src/core/context", () => ({
+  getSessionContext: vi.fn()
+}));
+
 import { prisma } from "../src/lib/prisma";
+import { getSessionContext } from "../src/core/context";
 import { requireBranchSession, requireSession } from "../src/middleware/auth";
 
 const db = prisma as any;
+const getContext = getSessionContext as any;
 
 const session = (overrides = {}) => ({
   id: "session-1",
@@ -35,6 +41,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   db.userSession.update.mockResolvedValue({});
   db.userSession.findUnique.mockResolvedValue(session());
+  getContext.mockResolvedValue(context());
 });
 
 describe("session middleware", () => {
@@ -54,16 +61,12 @@ describe("session middleware", () => {
   });
 
   it("refreshes lastSeenAt for a valid session", async () => {
-    const { getSessionContext } = await import("../src/core/context");
-    vi.doMock("../src/core/context", () => ({ getSessionContext: vi.fn().mockResolvedValue(context()) }));
     const result = await requireSession("token");
     expect(result).toBeTruthy();
     expect(db.userSession.update).toHaveBeenCalledOnce();
   });
 
   it("requires the requested branch to match the active session branch", async () => {
-    const { getSessionContext } = await import("../src/core/context");
-    vi.doMock("../src/core/context", () => ({ getSessionContext: vi.fn().mockResolvedValue(context()) }));
     expect(await requireBranchSession("token", "branch-1")).toBeTruthy();
     expect(await requireBranchSession("token", "branch-2")).toBeNull();
   });
