@@ -3,6 +3,7 @@ import {
   listInventory,
   listInventoryMovements,
 } from "../core/inventory-query";
+import { getInventoryReplenishment } from "../core/inventory-replenishment";
 
 export async function getInventory(input: { branchId: string; productId: string }) {
   try {
@@ -23,6 +24,19 @@ export async function getInventoryList(input: { branchId: string; search?: strin
 export async function getInventoryMovements(input: { branchId: string; productId?: string; limit?: number }) {
   try {
     return { status: 200, body: await listInventoryMovements(input) };
+  } catch (error) {
+    return mapInventoryQueryError(error);
+  }
+}
+
+export async function getInventoryReplenishmentQuery(input: {
+  branchId: string;
+  productId?: string;
+  days?: number;
+  limit?: number;
+}) {
+  try {
+    return { status: 200, body: await getInventoryReplenishment(input) };
   } catch (error) {
     return mapInventoryQueryError(error);
   }
