@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { getMe, postLogin, postLogout, type LoginRequest } from "./auth";
+import { getInventory, getInventoryList, getInventoryMovements } from "./inventory-query";
 
 const COOKIE_NAME = "monarca_session";
 
@@ -40,6 +41,12 @@ function clearSessionCookie() {
   return COOKIE_NAME + "=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict";
 }
 
+function queryNumber(value: string | null) {
+  if (value === null) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 export async function handleRequest(request: IncomingMessage, response: ServerResponse) {
   const url = new URL(request.url ?? "/", "http://localhost");
   const method = request.method ?? "GET";
@@ -62,6 +69,20 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (method === "POST" && url.pathname === "/auth/logout") {
       const result = await postLogout(sessionToken(request));
       sendJson(response, result.status, result.body, { "set-cookie": clearSessionCookie() }); return;
+    }
+    if (method === "GET" && url.pathname === "/inventory") {
+      const branchId = url.searchParams.get("branchId");
+      const productId = url.searchParams.get("productId");
+      const result = branchId && productId
+        ? await getInventory({ branchId, productId })
+        : await getInventoryList({ branchId: branchId ?? "", search: url.searchParams.get("search") ?? undefined, limit: queryNumber(url.searchParams.get("limit")) });
+      sendJson(response, result.status, result.body); return;
+    }
+    if (method === "GET" && url.pathname === "/inventory/movements") {
+      const branchId = url.searchParams.get("branchId");
+      if (!branchId) { sendJson(response, 400, { error: "BRANCH_ID_REQUIRED" }); return; }
+      const result = await getInventoryMovements({ branchId, productId: url.searchParams.get("productId") ?? undefined, limit: queryNumber(url.searchParams.get("limit")) });
+      sendJson(response, result.status, result.body); return;
     }
     if (method === "GET" && url.pathname === "/health") {
       sendJson(response, 200, { system: "Monarca POS", status: "ok" }); return;
