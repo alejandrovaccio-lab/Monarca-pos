@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { getMe, postLogin, postLogout, type LoginRequest } from "./auth";
 import { getInventory, getInventoryList, getInventoryMovements, getInventoryReplenishmentQuery } from "./inventory-query";
 import { postPhysicalCountExecution, postPhysicalCountRequest } from "./physical-counts";
+import { postPurchaseExecution, postPurchaseRequest } from "./purchases";
 
 const COOKIE_NAME = "monarca_session";
 function readCookies(request: IncomingMessage) { const header = request.headers.cookie ?? ""; return Object.fromEntries(header.split(";").filter(Boolean).map((part) => { const index = part.indexOf("="); return [part.slice(0,index).trim(), decodeURIComponent(part.slice(index+1).trim())]; })); }
@@ -23,6 +24,8 @@ export async function handleRequest(request:IncomingMessage,response:ServerRespo
   if(method==="GET"&&url.pathname==="/inventory/replenishment"){const branchId=url.searchParams.get("branchId");if(!branchId){sendJson(response,400,{error:"BRANCH_ID_REQUIRED"});return;}const result=await getInventoryReplenishmentQuery({branchId,productId:url.searchParams.get("productId")??undefined,days:queryNumber(url.searchParams.get("days")),limit:queryNumber(url.searchParams.get("limit"))});sendJson(response,result.status,result.body);return;}
   if(method==="POST"&&url.pathname==="/inventory/physical-counts"){const result=await postPhysicalCountRequest(await readJson(request) as any);sendJson(response,result.status,result.body);return;}
   if(method==="POST"&&url.pathname==="/inventory/physical-counts/execute"){const result=await postPhysicalCountExecution(await readJson(request) as any);sendJson(response,result.status,result.body);return;}
+  if(method==="POST"&&url.pathname==="/purchases"){const result=await postPurchaseRequest(await readJson(request) as any);sendJson(response,result.status,result.body);return;}
+  if(method==="POST"&&url.pathname==="/purchases/execute"){const result=await postPurchaseExecution(await readJson(request) as any);sendJson(response,result.status,result.body);return;}
   if(method==="GET"&&url.pathname==="/health"){sendJson(response,200,{system:"Monarca POS",status:"ok"});return;}
   sendJson(response,404,{error:"NOT_FOUND"});
  }catch(error){if(error instanceof Error&&error.message==="INVALID_JSON"){sendJson(response,400,{error:"INVALID_JSON",message:"Request body must be valid JSON."});return;}sendJson(response,500,{error:"INTERNAL_SERVER_ERROR"});}
