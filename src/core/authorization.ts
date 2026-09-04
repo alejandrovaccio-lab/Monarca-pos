@@ -50,7 +50,8 @@ export async function resolveAuthorization(input: {
     await tx.auditLog.create({ data: {
       organizationId: request.organizationId, branchId: request.branchId, userId: input.approverId,
       action: `AUTHORIZATION_${status}`, entityType: request.entityType, entityId: request.entityId,
-      beforeData: request.beforeData, afterData: request.requestedData
+      beforeData: request.beforeData == null ? undefined : request.beforeData,
+      afterData: request.requestedData == null ? undefined : request.requestedData
     }});
     return { approval, request: resolved };
   });
