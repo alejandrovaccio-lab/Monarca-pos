@@ -39,4 +39,6 @@ jobs:
       - run: npx prisma generate
       - run: npx prisma migrate deploy
       - run: npx tsc --noEmit
+      - name: Run unit tests
+        run: npm test
       - run: npx prisma migrate status
