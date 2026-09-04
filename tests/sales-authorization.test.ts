@@ -9,9 +9,11 @@ vi.mock("../src/lib/prisma", () => ({
     auditLog: { create: vi.fn() },
     $transaction: vi.fn(async (callback: any) => callback({
       sale: {
-        findUnique: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "COMPLETED" }),
-        update: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "CANCELLED" }),
+        findUnique: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "COMPLETED", items: [] }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
+      inventoryBalance: { upsert: vi.fn() },
+      inventoryMovement: { create: vi.fn() },
       auditLog: { create: vi.fn().mockResolvedValue({ id: "audit-1" }) },
     })),
   },
@@ -64,9 +66,11 @@ describe("sale authorization enforcement", () => {
     db.authorizationRequest.findUnique.mockResolvedValue({ id: "request-2", status: "APPROVED", entityType: "Sale", entityId: "sale-1", organizationId: "org-1", branchId: "branch-1", requestedData: { status: "REFUNDED" } });
     db.$transaction.mockImplementationOnce(async (callback: any) => callback({
       sale: {
-        findUnique: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "COMPLETED" }),
-        update: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "REFUNDED" }),
+        findUnique: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "COMPLETED", items: [] }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
+      inventoryBalance: { upsert: vi.fn() },
+      inventoryMovement: { create: vi.fn() },
       auditLog: { create: vi.fn().mockResolvedValue({ id: "audit-2" }) },
     }));
 
