@@ -88,7 +88,7 @@ describe("inventory query", () => {
       soldQuantity: 30,
       averageDailyConsumption: 1,
       daysOfInventory: 8,
-      status: "LOW",
+      status: "REORDER",
       suggestedReplenishment: 12,
     });
   });
