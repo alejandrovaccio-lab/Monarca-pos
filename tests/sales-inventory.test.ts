@@ -9,15 +9,7 @@ vi.mock("../src/lib/prisma", () => ({
     inventoryBalance: { upsert: vi.fn() },
     inventoryMovement: { create: vi.fn() },
     auditLog: { create: vi.fn() },
-    $transaction: vi.fn(async (callback: any) => callback({
-      sale: {
-        findUnique: vi.fn(),
-        updateMany: vi.fn(),
-      },
-      inventoryBalance: { upsert: vi.fn() },
-      inventoryMovement: { create: vi.fn() },
-      auditLog: { create: vi.fn() },
-    })),
+    $transaction: vi.fn(),
   },
 }));
 
@@ -54,22 +46,37 @@ describe("authorized sale inventory restoration", () => {
     db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
     db.authorizationRequest.findUnique.mockResolvedValue(authorization);
 
-    const txSale = db.$transaction;
-    txSale.mockImplementation(async (callback: any) => callback({
-      sale: {
-        findUnique: vi.fn().mockResolvedValue(sale),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-      inventoryBalance: { upsert: vi.fn().mockResolvedValue({}) },
-      inventoryMovement: { create: vi.fn().mockResolvedValue({}) },
-      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const upsert = vi.fn().mockResolvedValue({});
+    const movement = vi.fn().mockResolvedValue({});
+    const audit = vi.fn().mockResolvedValue({});
+    db.$transaction.mockImplementation(async (callback: any) => callback({
+      sale: { findUnique: vi.fn().mockResolvedValue(sale), updateMany },
+      inventoryBalance: { upsert },
+      inventoryMovement: { create: movement },
+      auditLog: { create: audit },
     }));
 
     const result = await executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" });
 
     expect(result.status).toBe("CANCELLED");
-    const tx = await txSale.mock.results[0].value;
-    expect(tx).toBeDefined();
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: "sale-1", status: "COMPLETED" },
+      data: { status: "CANCELLED" },
+    });
+    expect(upsert).toHaveBeenCalledTimes(2);
+    expect(upsert).toHaveBeenNthCalledWith(1, {
+      where: { branchId_productId: { branchId: "branch-1", productId: "product-1" } },
+      create: { branchId: "branch-1", productId: "product-1", quantity: 2 },
+      update: { quantity: { increment: 2 } },
+    });
+    expect(upsert).toHaveBeenNthCalledWith(2, {
+      where: { branchId_productId: { branchId: "branch-1", productId: "product-2" } },
+      create: { branchId: "branch-1", productId: "product-2", quantity: 0.5 },
+      update: { quantity: { increment: 0.5 } },
+    });
+    expect(movement).toHaveBeenCalledTimes(2);
+    expect(audit).toHaveBeenCalledOnce();
   });
 
   it("does not execute an unapproved request", async () => {
