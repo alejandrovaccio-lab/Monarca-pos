@@ -66,10 +66,10 @@ function bodyBranchId(body: unknown) {
 }
 
 async function requireOperationalBranch(request: IncomingMessage, branchId: string | undefined) {
-  if (!branchId) return { status: 400, body: { error: "BRANCH_ID_REQUIRED" } } as const;
+  if (!branchId) return { ok: false as const, status: 400, body: { error: "BRANCH_ID_REQUIRED" } };
   const context = await requireBranchSession(sessionToken(request), branchId);
-  if (!context) return { status: 401, body: { error: "AUTHENTICATION_REQUIRED" } } as const;
-  return { ...context, branchId };
+  if (!context) return { ok: false as const, status: 401, body: { error: "AUTHENTICATION_REQUIRED" } };
+  return { ok: true as const, ...context, branchId };
 }
 
 export async function handleRequest(request: IncomingMessage, response: ServerResponse) {
@@ -106,7 +106,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (method === "GET" && url.pathname === "/inventory") {
       const branchId = url.searchParams.get("branchId") ?? undefined;
       const auth = await requireOperationalBranch(request, branchId);
-      if ("status" in auth) {
+      if (!auth.ok) {
         sendJson(response, auth.status, auth.body);
         return;
       }
@@ -121,7 +121,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (method === "GET" && url.pathname === "/inventory/movements") {
       const branchId = url.searchParams.get("branchId") ?? undefined;
       const auth = await requireOperationalBranch(request, branchId);
-      if ("status" in auth) {
+      if (!auth.ok) {
         sendJson(response, auth.status, auth.body);
         return;
       }
@@ -133,7 +133,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (method === "GET" && url.pathname === "/inventory/replenishment") {
       const branchId = url.searchParams.get("branchId") ?? undefined;
       const auth = await requireOperationalBranch(request, branchId);
-      if ("status" in auth) {
+      if (!auth.ok) {
         sendJson(response, auth.status, auth.body);
         return;
       }
@@ -145,7 +145,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (method === "POST" && (url.pathname === "/inventory/physical-counts" || url.pathname === "/inventory/physical-counts/execute" || url.pathname === "/purchases" || url.pathname === "/purchases/execute")) {
       const body = await readJson(request);
       const auth = await requireOperationalBranch(request, bodyBranchId(body));
-      if ("status" in auth) {
+      if (!auth.ok) {
         sendJson(response, auth.status, auth.body);
         return;
       }
