@@ -5,6 +5,7 @@ import { postPhysicalCountExecution, postPhysicalCountRequest } from "./physical
 import { postPurchaseExecution, postPurchaseRequest } from "./purchases";
 import { postOpenRegister, postCloseRegister } from "./registers";
 import { postCreateSale } from "./sales-create";
+import { getSaleTicketQuery } from "./sales-ticket";
 import { requireBranchSession } from "../middleware/auth";
 
 const COOKIE_NAME = "monarca_session";
@@ -229,6 +230,19 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         items: Array.isArray(input.items) ? input.items as any : [],
         payments: Array.isArray(input.payments) ? input.payments as any : [],
       });
+      sendJson(response, result.status, result.body);
+      return;
+    }
+
+    const saleTicketMatch = method === "GET" ? url.pathname.match(/^\/sales\/([^/]+)\/ticket$/) : null;
+    if (saleTicketMatch) {
+      const branchId = url.searchParams.get("branchId") ?? undefined;
+      const auth = await requireOperationalBranch(request, branchId);
+      if (!auth.ok) {
+        sendJson(response, auth.status, auth.body);
+        return;
+      }
+      const result = await getSaleTicketQuery({ saleId: decodeURIComponent(saleTicketMatch[1]), branchId: auth.branchId });
       sendJson(response, result.status, result.body);
       return;
     }
