@@ -4,6 +4,7 @@ import { getInventory, getInventoryList, getInventoryMovements, getInventoryRepl
 import { postPhysicalCountExecution, postPhysicalCountRequest } from "./physical-counts";
 import { postPurchaseExecution, postPurchaseRequest } from "./purchases";
 import { postOpenRegister, postCloseRegister } from "./registers";
+import { postCreateSale } from "./sales-create";
 import { requireBranchSession } from "../middleware/auth";
 
 const COOKIE_NAME = "monarca_session";
@@ -203,6 +204,30 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         sessionId: typeof input.sessionId === "string" ? input.sessionId : "",
         closedById: auth.userId,
         closingTotal: typeof input.closingTotal === "number" ? input.closingTotal : Number(input.closingTotal),
+      });
+      sendJson(response, result.status, result.body);
+      return;
+    }
+
+    if (method === "POST" && url.pathname === "/sales") {
+      const body = await readJson(request);
+      const branchId = bodyBranchId(body);
+      const auth = await requireOperationalBranch(request, branchId);
+      if (!auth.ok) {
+        sendJson(response, auth.status, auth.body);
+        return;
+      }
+      const input = body as Record<string, unknown>;
+      const result = await postCreateSale({
+        branchId: auth.branchId,
+        registerSessionId: typeof input.registerSessionId === "string" ? input.registerSessionId : "",
+        cashierId: auth.userId,
+        sellerId: typeof input.sellerId === "string" ? input.sellerId : undefined,
+        customerId: typeof input.customerId === "string" ? input.customerId : undefined,
+        folio: typeof input.folio === "string" ? input.folio : undefined,
+        soldAt: typeof input.soldAt === "string" ? input.soldAt : undefined,
+        items: Array.isArray(input.items) ? input.items as any : [],
+        payments: Array.isArray(input.payments) ? input.payments as any : [],
       });
       sendJson(response, result.status, result.body);
       return;
