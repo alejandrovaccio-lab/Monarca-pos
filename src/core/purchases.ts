@@ -114,7 +114,9 @@ export async function executeApprovedPurchaseReceipt(input: {
 
   validateItems(requested.items);
   const purchasedAt = new Date(requested.purchasedAt);
+  const folio = requested.folio.trim();
   if (Number.isNaN(purchasedAt.getTime())) throw new Error("PURCHASE_DATE_INVALID");
+  if (!folio) throw new Error("PURCHASE_FOLIO_REQUIRED");
 
   return prisma.$transaction(async (tx) => {
     const existing = await tx.purchase.findUnique({ where: { id: requested.purchaseId! } });
@@ -141,7 +143,7 @@ export async function executeApprovedPurchaseReceipt(input: {
         id: requested.purchaseId!,
         branchId: authorization.branchId!,
         supplierId: requested.supplierId!,
-        folio: requested.folio.trim(),
+        folio,
         purchasedAt,
         items: {
           create: requested.items!.map((item) => ({
@@ -180,7 +182,7 @@ export async function executeApprovedPurchaseReceipt(input: {
           userId: input.executorId,
           employeeId: requested.employeeId,
           occurredAt: purchasedAt,
-          notes: `Compra ${requested.folio}: ${authorization.reason}`,
+          notes: `Compra ${folio}: ${authorization.reason}`,
         },
       });
 
@@ -206,7 +208,7 @@ export async function executeApprovedPurchaseReceipt(input: {
         afterData: {
           purchaseId: purchase.id,
           supplierId: requested.supplierId,
-          folio: requested.folio,
+          folio,
           employeeId: requested.employeeId,
           items: requested.items,
           authorizationRequestId: authorization.id,
