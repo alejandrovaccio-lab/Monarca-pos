@@ -106,7 +106,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (method === "GET" && url.pathname === "/inventory") {
       const branchId = url.searchParams.get("branchId") ?? undefined;
       const auth = await requireOperationalBranch(request, branchId);
-      if ("status" in auth) {
+      if ("body" in auth) {
         sendJson(response, auth.status, auth.body);
         return;
       }
@@ -121,7 +121,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (method === "GET" && url.pathname === "/inventory/movements") {
       const branchId = url.searchParams.get("branchId") ?? undefined;
       const auth = await requireOperationalBranch(request, branchId);
-      if ("status" in auth) {
+      if ("body" in auth) {
         sendJson(response, auth.status, auth.body);
         return;
       }
@@ -133,7 +133,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (method === "GET" && url.pathname === "/inventory/replenishment") {
       const branchId = url.searchParams.get("branchId") ?? undefined;
       const auth = await requireOperationalBranch(request, branchId);
-      if ("status" in auth) {
+      if ("body" in auth) {
         sendJson(response, auth.status, auth.body);
         return;
       }
@@ -145,7 +145,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (method === "POST" && (url.pathname === "/inventory/physical-counts" || url.pathname === "/inventory/physical-counts/execute" || url.pathname === "/purchases" || url.pathname === "/purchases/execute")) {
       const body = await readJson(request);
       const auth = await requireOperationalBranch(request, bodyBranchId(body));
-      if ("status" in auth) {
+      if ("body" in auth) {
         sendJson(response, auth.status, auth.body);
         return;
       }
