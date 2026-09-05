@@ -69,7 +69,7 @@ async function requireOperationalBranch(request: IncomingMessage, branchId: stri
   if (!branchId) return { status: 400, body: { error: "BRANCH_ID_REQUIRED" } } as const;
   const context = await requireBranchSession(sessionToken(request), branchId);
   if (!context) return { status: 401, body: { error: "AUTHENTICATION_REQUIRED" } } as const;
-  return context;
+  return { ...context, branchId };
 }
 
 export async function handleRequest(request: IncomingMessage, response: ServerResponse) {
