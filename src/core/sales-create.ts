@@ -40,6 +40,10 @@ function roundMoney(value: Prisma.Decimal) {
   return value.toDecimalPlaces(2);
 }
 
+function formatMoney(value: Prisma.Decimal) {
+  return roundMoney(value).toFixed(2);
+}
+
 function generateFolio() {
   const date = new Date().toISOString().slice(0, 10).replaceAll("-", "");
   return `V-${date}-${randomUUID().slice(0, 8).toUpperCase()}`;
@@ -202,10 +206,10 @@ export async function createSale(input: {
         entityType: "Sale",
         entityId: sale.id,
         beforeData: { inventoryChanged: true },
-        afterData: { saleId: sale.id, folio, cashierId: input.cashierId, sellerId: input.sellerId || null, customerId: input.customerId || null, total: total.toString(), paymentMethods: preparedPayments.map((payment) => payment.method) },
+        afterData: { saleId: sale.id, folio, cashierId: input.cashierId, sellerId: input.sellerId || null, customerId: input.customerId || null, total: formatMoney(total), paymentMethods: preparedPayments.map((payment) => payment.method) },
       },
     });
 
-    return { ...sale, total: total.toString() };
+    return { ...sale, total: formatMoney(total) };
   });
 }
