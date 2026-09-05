@@ -3,6 +3,7 @@ import { getMe, postLogin, postLogout, type LoginRequest } from "./auth";
 import { getInventory, getInventoryList, getInventoryMovements, getInventoryReplenishmentQuery } from "./inventory-query";
 import { postPhysicalCountExecution, postPhysicalCountRequest } from "./physical-counts";
 import { postPurchaseExecution, postPurchaseRequest } from "./purchases";
+import { postOpenRegister, postCloseRegister } from "./registers";
 import { requireBranchSession } from "../middleware/auth";
 
 const COOKIE_NAME = "monarca_session";
@@ -166,6 +167,43 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         return;
       }
       const result = await postPurchaseExecution(body as any);
+      sendJson(response, result.status, result.body);
+      return;
+    }
+
+    if (method === "POST" && url.pathname === "/registers/open") {
+      const body = await readJson(request);
+      const branchId = bodyBranchId(body);
+      const auth = await requireOperationalBranch(request, branchId);
+      if (!auth.ok) {
+        sendJson(response, auth.status, auth.body);
+        return;
+      }
+      const input = body as { registerId?: unknown; openingFloat?: unknown };
+      const result = await postOpenRegister({
+        branchId: auth.branchId,
+        registerId: typeof input.registerId === "string" ? input.registerId : "",
+        openedById: auth.userId,
+        openingFloat: typeof input.openingFloat === "number" ? input.openingFloat : Number(input.openingFloat),
+      });
+      sendJson(response, result.status, result.body);
+      return;
+    }
+
+    if (method === "POST" && url.pathname === "/registers/close") {
+      const body = await readJson(request);
+      const input = body as { sessionId?: unknown; closingTotal?: unknown; branchId?: unknown };
+      const branchId = typeof input.branchId === "string" ? input.branchId : undefined;
+      const auth = await requireOperationalBranch(request, branchId);
+      if (!auth.ok) {
+        sendJson(response, auth.status, auth.body);
+        return;
+      }
+      const result = await postCloseRegister({
+        sessionId: typeof input.sessionId === "string" ? input.sessionId : "",
+        closedById: auth.userId,
+        closingTotal: typeof input.closingTotal === "number" ? input.closingTotal : Number(input.closingTotal),
+      });
       sendJson(response, result.status, result.body);
       return;
     }
