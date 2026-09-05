@@ -53,10 +53,10 @@ function clearSessionCookie() {
   return `${COOKIE_NAME}=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict`;
 }
 
-function queryNumber(value: string | null) {
-  if (value === null) return undefined;
+function queryNumber(value: string | null, fallback: number) {
+  if (value === null) return fallback;
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function bodyBranchId(body: unknown) {
@@ -113,7 +113,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       const productId = url.searchParams.get("productId");
       const result = productId
         ? await getInventory({ branchId: auth.branchId, productId })
-        : await getInventoryList({ branchId: auth.branchId, search: url.searchParams.get("search") ?? undefined, limit: queryNumber(url.searchParams.get("limit")) });
+        : await getInventoryList({ branchId: auth.branchId, search: url.searchParams.get("search") ?? undefined, limit: queryNumber(url.searchParams.get("limit"), 50) });
       sendJson(response, result.status, result.body);
       return;
     }
@@ -125,7 +125,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         sendJson(response, auth.status, auth.body);
         return;
       }
-      const result = await getInventoryMovements({ branchId: auth.branchId, productId: url.searchParams.get("productId") ?? undefined, limit: queryNumber(url.searchParams.get("limit")) });
+      const result = await getInventoryMovements({ branchId: auth.branchId, productId: url.searchParams.get("productId") ?? undefined, limit: queryNumber(url.searchParams.get("limit"), 100) });
       sendJson(response, result.status, result.body);
       return;
     }
@@ -137,7 +137,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         sendJson(response, auth.status, auth.body);
         return;
       }
-      const result = await getInventoryReplenishmentQuery({ branchId: auth.branchId, productId: url.searchParams.get("productId") ?? undefined, days: queryNumber(url.searchParams.get("days")), limit: queryNumber(url.searchParams.get("limit")) });
+      const result = await getInventoryReplenishmentQuery({ branchId: auth.branchId, productId: url.searchParams.get("productId") ?? undefined, days: queryNumber(url.searchParams.get("days"), 30), limit: queryNumber(url.searchParams.get("limit"), 200) });
       sendJson(response, result.status, result.body);
       return;
     }
