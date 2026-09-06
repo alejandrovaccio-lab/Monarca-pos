@@ -7,6 +7,7 @@ import { postOpenRegister, postCloseRegister } from "./registers";
 import { postCreateSale } from "./sales-create";
 import { getSaleTicketQuery } from "./sales-ticket";
 import { getSaleTicketPrintQuery } from "./sales-ticket-print";
+import { getOrders, postCreateOrder, postOrderSaleLink, postOrderStatus } from "./orders";
 import { requireBranchSession } from "../middleware/auth";
 
 const COOKIE_NAME = "monarca_session";
@@ -230,6 +231,79 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
         soldAt: typeof input.soldAt === "string" ? input.soldAt : undefined,
         items: Array.isArray(input.items) ? input.items as any : [],
         payments: Array.isArray(input.payments) ? input.payments as any : [],
+      });
+      sendJson(response, result.status, result.body);
+      return;
+    }
+
+    if (method === "POST" && url.pathname === "/orders") {
+      const body = await readJson(request);
+      const auth = await requireOperationalBranch(request, bodyBranchId(body));
+      if (!auth.ok) {
+        sendJson(response, auth.status, auth.body);
+        return;
+      }
+      const input = body as Record<string, unknown>;
+      const result = await postCreateOrder({
+        branchId: auth.branchId,
+        customerId: typeof input.customerId === "string" ? input.customerId : undefined,
+        channel: input.channel as "WHATSAPP" | "PICKUP" | "OTHER",
+        requestedAt: typeof input.requestedAt === "string" ? input.requestedAt : undefined,
+        items: Array.isArray(input.items) ? input.items as Array<{ productId: string; quantity: number | string }> : [],
+      });
+      sendJson(response, result.status, result.body);
+      return;
+    }
+
+    if (method === "GET" && url.pathname === "/orders") {
+      const branchId = url.searchParams.get("branchId") ?? undefined;
+      const auth = await requireOperationalBranch(request, branchId);
+      if (!auth.ok) {
+        sendJson(response, auth.status, auth.body);
+        return;
+      }
+      const status = url.searchParams.get("status");
+      const result = await getOrders({
+        branchId: auth.branchId,
+        status: status ? status as "RECEIVED" | "PREPARING" | "READY" | "COMPLETED" | "CANCELLED" : undefined,
+        limit: queryNumber(url.searchParams.get("limit"), 50),
+      });
+      sendJson(response, result.status, result.body);
+      return;
+    }
+
+    const orderStatusMatch = method === "POST" ? url.pathname.match(/^\/orders\/([^/]+)\/status$/) : null;
+    if (orderStatusMatch) {
+      const body = await readJson(request);
+      const auth = await requireOperationalBranch(request, bodyBranchId(body));
+      if (!auth.ok) {
+        sendJson(response, auth.status, auth.body);
+        return;
+      }
+      const input = body as Record<string, unknown>;
+      const result = await postOrderStatus({
+        branchId: auth.branchId,
+        orderId: decodeURIComponent(orderStatusMatch[1]),
+        status: input.status as "RECEIVED" | "PREPARING" | "READY" | "COMPLETED" | "CANCELLED",
+        preparedById: auth.userId,
+      });
+      sendJson(response, result.status, result.body);
+      return;
+    }
+
+    const orderSaleMatch = method === "POST" ? url.pathname.match(/^\/orders\/([^/]+)\/sale$/) : null;
+    if (orderSaleMatch) {
+      const body = await readJson(request);
+      const auth = await requireOperationalBranch(request, bodyBranchId(body));
+      if (!auth.ok) {
+        sendJson(response, auth.status, auth.body);
+        return;
+      }
+      const input = body as Record<string, unknown>;
+      const result = await postOrderSaleLink({
+        branchId: auth.branchId,
+        orderId: decodeURIComponent(orderSaleMatch[1]),
+        saleId: typeof input.saleId === "string" ? input.saleId : "",
       });
       sendJson(response, result.status, result.body);
       return;
