@@ -253,8 +253,8 @@ model Role {
 }
 
 model Permission {
-  id          String   @id @default(uuid()) @db.Uuid
-  code        String   @unique
+  id          String  @id @default(uuid()) @db.Uuid
+  code        String  @unique
   description String?
 
   roles RolePermission[]
@@ -515,7 +515,7 @@ model InventoryMovement {
   referenceId   String?               @db.Uuid
   userId        String?               @db.Uuid
   employeeId    String?               @db.Uuid
-  occurredAt    DateTime              
+  occurredAt    DateTime
   createdAt     DateTime              @default(now())
   notes         String?
 
@@ -621,12 +621,12 @@ model Order {
 }
 
 model OrderItem {
-  id              String   @id @default(uuid()) @db.Uuid
-  orderId         String   @db.Uuid
-  productId       String   @db.Uuid
-  quantity        Decimal  @db.Decimal(14, 4)
-  actualQuantity  Decimal? @db.Decimal(14, 4)
-  unitPrice       Decimal? @db.Decimal(14, 4)
+  id             String   @id @default(uuid()) @db.Uuid
+  orderId        String   @db.Uuid
+  productId      String   @db.Uuid
+  quantity       Decimal  @db.Decimal(14, 4)
+  actualQuantity Decimal? @db.Decimal(14, 4)
+  unitPrice      Decimal? @db.Decimal(14, 4)
 
   order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id])
