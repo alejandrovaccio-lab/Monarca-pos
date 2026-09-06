@@ -69,6 +69,6 @@ export function formatSaleTicketForThermal(ticket: PrintableTicket) {
 
   for (const payment of ticket.payments) output.push(row(payment.method, payment.amount));
 
-  output.push(line(), center("Gracias por tu compra"), "");
+  output.push(line(), center("Gracias por tu compra"));
   return output.join("\n");
 }
