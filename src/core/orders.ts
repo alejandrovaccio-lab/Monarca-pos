@@ -18,7 +18,7 @@ const transitions: Record<OrderStatusInput, OrderStatusInput[]> = {
   CANCELLED: [],
 };
 
-function decimal(value: number | string) {
+function decimal(value: number | string | Prisma.Decimal) {
   try {
     return new Prisma.Decimal(String(value));
   } catch {
@@ -36,8 +36,8 @@ function roundMoney(value: Prisma.Decimal) {
   return value.toDecimalPlaces(2);
 }
 
-function orderTotal(items: Array<{ quantity: Prisma.Decimal; unitPrice: Prisma.Decimal }>) {
-  return roundMoney(items.reduce((sum, item) => sum.add(item.quantity.mul(item.unitPrice)), new Prisma.Decimal(0)));
+function orderTotal(items: Array<{ quantity: Prisma.Decimal | number | string; unitPrice: Prisma.Decimal | number | string }>) {
+  return roundMoney(items.reduce((sum, item) => sum.add(decimal(item.quantity).mul(decimal(item.unitPrice))), new Prisma.Decimal(0)));
 }
 
 export async function createOrder(input: {
