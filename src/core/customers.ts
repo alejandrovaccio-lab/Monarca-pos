@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 
 export type CustomerInput = { branchId: string; actorId: string; name: string; phone?: string; email?: string; taxId?: string };
 function clean(value?: string) { const result = value?.trim(); return result ? result : undefined; }
-function normalizePhone(phone?: string) { return (phone ?? "").replace(/\D/g, ""); }
+export function normalizeCustomerPhone(phone?: string) { return (phone ?? "").replace(/\D/g, ""); }
 function membershipCode(customerId: string) { return `MON-${customerId.toUpperCase()}`; }
 function present(customer: { id: string; organizationId: string; name: string; phone: string | null; email: string | null; taxId: string | null; createdAt: Date; updatedAt: Date }) { return { ...customer, membership: { code: membershipCode(customer.id), status: "ACTIVE" as const, qrPayload: `MONARCA-MEMBERSHIP:${customer.id}` } }; }
 async function branchContext(branchId: string, actorId: string) {
@@ -16,9 +16,17 @@ async function branchContext(branchId: string, actorId: string) {
   return { branch, actor };
 }
 async function ensureUniquePhone(organizationId: string, phone: string | undefined, excludeId?: string) {
-  const normalized = normalizePhone(phone); if (!normalized) return;
+  const normalized = normalizeCustomerPhone(phone); if (!normalized) return;
   const customers = await prisma.customer.findMany({ where: { organizationId, ...(excludeId ? { id: { not: excludeId } } : {}) }, select: { id: true, phone: true } });
-  if (customers.some((customer) => normalizePhone(customer.phone ?? undefined) === normalized)) throw new Error("CUSTOMER_PHONE_DUPLICATE");
+  if (customers.some((customer) => normalizeCustomerPhone(customer.phone ?? undefined) === normalized)) throw new Error("CUSTOMER_PHONE_DUPLICATE");
+}
+export async function findCustomerByPhone(input: { branchId: string; actorId: string; phone: string }) {
+  const { branch } = await branchContext(input.branchId, input.actorId);
+  const normalized = normalizeCustomerPhone(input.phone);
+  if (!normalized) throw new Error("CUSTOMER_PHONE_REQUIRED");
+  const customers = await prisma.customer.findMany({ where: { organizationId: branch.organizationId }, orderBy: { createdAt: "asc" }, select: { id: true, organizationId: true, name: true, phone: true, email: true, taxId: true, createdAt: true, updatedAt: true } });
+  const customer = customers.find((candidate) => normalizeCustomerPhone(candidate.phone ?? undefined) === normalized);
+  return customer ? present(customer) : null;
 }
 export async function createCustomer(input: CustomerInput) {
   const { branch } = await branchContext(input.branchId, input.actorId); const name = clean(input.name); if (!name) throw new Error("CUSTOMER_NAME_REQUIRED");
@@ -27,9 +35,9 @@ export async function createCustomer(input: CustomerInput) {
   return present(customer);
 }
 export async function listCustomers(input: { branchId: string; actorId: string; search?: string; phone?: string; membershipCode?: string; limit?: number }) {
-  const { branch } = await branchContext(input.branchId, input.actorId); const limit = Math.min(Math.max(input.limit ?? 50, 1), 200); const search = clean(input.search)?.toLowerCase(); const normalizedPhone = normalizePhone(input.phone); const requestedMembership = clean(input.membershipCode)?.toUpperCase();
+  const { branch } = await branchContext(input.branchId, input.actorId); const limit = Math.min(Math.max(input.limit ?? 50, 1), 200); const search = clean(input.search)?.toLowerCase(); const normalizedPhone = normalizeCustomerPhone(input.phone); const requestedMembership = clean(input.membershipCode)?.toUpperCase();
   const customers = await prisma.customer.findMany({ where: { organizationId: branch.organizationId }, orderBy: [{ name: "asc" }, { createdAt: "desc" }], take: 500 });
-  return customers.filter((customer) => { if (search && !customer.name.toLowerCase().includes(search) && !(customer.phone ?? "").includes(search) && !(customer.email ?? "").toLowerCase().includes(search)) return false; if (normalizedPhone && normalizePhone(customer.phone ?? undefined) !== normalizedPhone) return false; if (requestedMembership && membershipCode(customer.id) !== requestedMembership) return false; return true; }).slice(0, limit).map(present);
+  return customers.filter((customer) => { if (search && !customer.name.toLowerCase().includes(search) && !(customer.phone ?? "").includes(search) && !(customer.email ?? "").toLowerCase().includes(search)) return false; if (normalizedPhone && normalizeCustomerPhone(customer.phone ?? undefined) !== normalizedPhone) return false; if (requestedMembership && membershipCode(customer.id) !== requestedMembership) return false; return true; }).slice(0, limit).map(present);
 }
 export async function getCustomer(input: { branchId: string; actorId: string; customerId: string }) {
   const { branch } = await branchContext(input.branchId, input.actorId);
