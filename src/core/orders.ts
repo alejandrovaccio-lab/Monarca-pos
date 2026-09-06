@@ -1,14 +1,22 @@
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../lib/prisma";
+import { requestAuthorization } from "./authorization";
 
 export type OrderChannelInput = "WHATSAPP" | "PICKUP" | "OTHER";
-export type OrderStatusInput = "RECEIVED" | "PREPARING" | "READY" | "COMPLETED" | "CANCELLED";
+export type OrderStatusInput = "RECEIVED" | "PREPARING" | "READY" | "PAID" | "DELIVERED" | "COMPLETED" | "CANCELLED";
 export type OrderItemInput = { productId: string; quantity: number | string };
 
 const transitions: Record<OrderStatusInput, OrderStatusInput[]> = {
-  RECEIVED: ["PREPARING", "CANCELLED"], PREPARING: ["READY", "CANCELLED"], READY: ["COMPLETED", "CANCELLED"], COMPLETED: [], CANCELLED: [],
+  RECEIVED: ["PREPARING", "CANCELLED"],
+  PREPARING: ["READY", "CANCELLED"],
+  READY: ["PAID", "COMPLETED", "CANCELLED"],
+  PAID: ["DELIVERED", "CANCELLED"],
+  DELIVERED: ["COMPLETED"],
+  COMPLETED: [],
+  CANCELLED: [],
 };
+
 function decimal(value: number | string | Prisma.Decimal) { try { return new Prisma.Decimal(String(value)); } catch { throw new Error("ORDER_AMOUNT_INVALID"); } }
 function positiveDecimal(value: number | string, errorCode: string) { const result = decimal(value); if (!result.isFinite() || result.lte(0)) throw new Error(errorCode); return result; }
 function roundMoney(value: Prisma.Decimal) { return value.toDecimalPlaces(2); }
@@ -54,7 +62,7 @@ export async function listOrders(input: { branchId: string; status?: OrderStatus
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
   if (input.status && !Object.prototype.hasOwnProperty.call(transitions, input.status)) throw new Error("ORDER_STATUS_INVALID");
   const orders = await prisma.order.findMany({ where: { branchId: input.branchId, ...(input.status ? { status: input.status } : {}) }, orderBy: [{ requestedAt: "desc" }, { createdAt: "desc" }], take: limit, include: { customer: { select: { id: true, name: true, phone: true } }, items: { include: { product: { select: { id: true, name: true, sku: true } } } } } });
-  return orders.map((order) => ({ ...order, total: orderTotal(order.items.filter((item) => item.unitPrice !== null).map((item) => ({ quantity: item.quantity, unitPrice: item.unitPrice! }))).toFixed(2) }));
+  return orders.map((order) => ({ ...order, total: orderTotal(order.items.map((item) => ({ quantity: item.actualQuantity ?? item.quantity, unitPrice: item.unitPrice ?? 0 }))).toFixed(2) }));
 }
 
 export async function transitionOrder(input: { branchId: string; orderId: string; status: OrderStatusInput; preparedById?: string }) {
@@ -63,17 +71,63 @@ export async function transitionOrder(input: { branchId: string; orderId: string
   const order = await prisma.order.findUnique({ where: { id: input.orderId }, select: { id: true, branchId: true, status: true, saleId: true } });
   if (!order || order.branchId !== input.branchId) throw new Error("ORDER_NOT_FOUND");
   if (!transitions[order.status as OrderStatusInput].includes(input.status)) throw new Error("ORDER_TRANSITION_INVALID");
-  if (input.status === "COMPLETED" && !order.saleId) throw new Error("ORDER_SALE_REQUIRED");
+  if ((input.status === "PAID" || input.status === "DELIVERED" || input.status === "COMPLETED") && !order.saleId) throw new Error("ORDER_SALE_REQUIRED");
   if (input.preparedById) {
     const user = await prisma.user.findUnique({ where: { id: input.preparedById }, select: { id: true, organizationId: true, status: true, branchAccess: { where: { branchId: input.branchId }, select: { branchId: true } } } });
     const branch = await prisma.branch.findUnique({ where: { id: input.branchId }, select: { organizationId: true } });
-    if (!user || !branch || user.status !== "ACTIVE" || user.organizationId !== branch.organizationId || !user.branchAccess.length) throw new Error("PREPARER_NOT_AUTHORIZED");
+    if (!user || !branch || user.status !== "ACTIVE" || user.organizationId !== branch.organizationId || !user.branchAccess.length) throw new Error("ACTOR_NOT_AUTHORIZED");
   }
   return prisma.$transaction(async (tx) => {
     const updated = await tx.order.update({ where: { id: input.orderId }, data: { status: input.status, ...(input.status === "PREPARING" || input.status === "READY" ? { preparedById: input.preparedById || null } : {}) }, include: { items: true, customer: true } });
     const branch = await tx.branch.findUnique({ where: { id: input.branchId }, select: { organizationId: true } });
     if (branch) await tx.auditLog.create({ data: { organizationId: branch.organizationId, branchId: input.branchId, userId: input.preparedById || null, action: `ORDER_${input.status}`, entityType: "Order", entityId: updated.id, beforeData: { status: order.status }, afterData: { status: updated.status, saleId: updated.saleId } } });
     return updated;
+  });
+}
+
+export async function requestOrderAdjustment(input: { branchId: string; orderId: string; requestedById: string; reason: string; items: Array<{ orderItemId: string; actualQuantity: number | string }> }) {
+  if (!input.branchId || !input.orderId || !input.requestedById || !input.items.length) throw new Error("ORDER_ADJUSTMENT_CONTEXT_REQUIRED");
+  if (!input.reason?.trim()) throw new Error("REASON_REQUIRED");
+  const order = await prisma.order.findUnique({ where: { id: input.orderId }, include: { items: true } });
+  if (!order || order.branchId !== input.branchId) throw new Error("ORDER_NOT_FOUND");
+  if (order.status === "CANCELLED" || order.status === "COMPLETED") throw new Error("ORDER_ADJUSTMENT_NOT_ALLOWED");
+  const branch = await prisma.branch.findUnique({ where: { id: input.branchId }, select: { organizationId: true } });
+  const actor = await prisma.user.findUnique({ where: { id: input.requestedById }, select: { id: true, organizationId: true, status: true, branchAccess: { where: { branchId: input.branchId }, select: { branchId: true } } } });
+  if (!branch || !actor || actor.status !== "ACTIVE" || actor.organizationId !== branch.organizationId || !actor.branchAccess.length) throw new Error("ACTOR_NOT_AUTHORIZED");
+  const requested = input.items.map((item) => {
+    const current = order.items.find((candidate) => candidate.id === item.orderItemId);
+    if (!current) throw new Error("ORDER_ITEM_NOT_FOUND");
+    const actualQuantity = positiveDecimal(item.actualQuantity, "ORDER_ACTUAL_QUANTITY_INVALID");
+    return { orderItemId: current.id, requestedQuantity: current.quantity.toString(), actualQuantity: actualQuantity.toString() };
+  });
+  const changed = requested.some((item) => item.requestedQuantity !== item.actualQuantity);
+  if (!changed) throw new Error("ORDER_ADJUSTMENT_NO_CHANGE");
+  const authorization = await requestAuthorization({ organizationId: branch.organizationId, branchId: input.branchId, requestedById: input.requestedById, type: "ORDER_ADJUSTMENT", reason: input.reason.trim(), entityType: "Order", entityId: order.id, beforeData: { items: requested.map((item) => ({ orderItemId: item.orderItemId, quantity: item.requestedQuantity })) }, requestedData: { items: requested.map((item) => ({ orderItemId: item.orderItemId, actualQuantity: item.actualQuantity })) } });
+  return authorization;
+}
+
+export async function executeApprovedOrderAdjustment(input: { branchId: string; orderId: string; authorizationRequestId: string; actorId: string }) {
+  const authorization = await prisma.authorizationRequest.findUnique({ where: { id: input.authorizationRequestId } });
+  if (!authorization || authorization.entityType !== "Order" || authorization.entityId !== input.orderId || authorization.branchId !== input.branchId) throw new Error("AUTHORIZATION_NOT_FOUND");
+  if (authorization.type !== "ORDER_ADJUSTMENT") throw new Error("AUTHORIZATION_TYPE_INVALID");
+  if (authorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
+  const data = authorization.requestedData as { items?: Array<{ orderItemId: string; actualQuantity: string }> } | null;
+  if (!data?.items?.length) throw new Error("ORDER_ADJUSTMENT_DATA_INVALID");
+  const actor = await prisma.user.findUnique({ where: { id: input.actorId }, select: { id: true, organizationId: true, status: true, branchAccess: { where: { branchId: input.branchId }, select: { branchId: true } } } });
+  if (!actor || actor.status !== "ACTIVE" || actor.organizationId !== authorization.organizationId || !actor.branchAccess.length) throw new Error("ACTOR_NOT_AUTHORIZED");
+  return prisma.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({ where: { id: input.orderId }, include: { items: true } });
+    if (!order || order.branchId !== input.branchId || order.status === "CANCELLED" || order.status === "COMPLETED") throw new Error("ORDER_ADJUSTMENT_NOT_ALLOWED");
+    const currentMap = new Map(order.items.map((item) => [item.id, item.quantity.toString()]));
+    for (const item of data.items!) {
+      const current = currentMap.get(item.orderItemId);
+      if (current === undefined) throw new Error("ORDER_ITEM_NOT_FOUND");
+      if (current !== (authorization.beforeData as any)?.items?.find((before: any) => before.orderItemId === item.orderItemId)?.quantity) throw new Error("ORDER_CHANGED_SINCE_REQUEST");
+      const actual = positiveDecimal(item.actualQuantity, "ORDER_ACTUAL_QUANTITY_INVALID");
+      await tx.orderItem.update({ where: { id: item.orderItemId }, data: { actualQuantity: actual } });
+    }
+    await tx.auditLog.create({ data: { organizationId: authorization.organizationId, branchId: input.branchId, userId: input.actorId, action: "ORDER_ADJUSTMENT_EXECUTED", entityType: "Order", entityId: order.id, beforeData: authorization.beforeData as any, afterData: authorization.requestedData as any } });
+    return tx.order.findUnique({ where: { id: order.id }, include: { items: true, customer: true } });
   });
 }
 
