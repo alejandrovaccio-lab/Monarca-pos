@@ -30,11 +30,12 @@ export async function createSaleFromOrder(input: {
   if (!order || order.branchId !== input.branchId) throw new Error("ORDER_NOT_FOUND");
   if (order.status !== "READY") throw new Error("ORDER_NOT_READY_FOR_SALE");
   if (order.saleId) throw new Error("ORDER_ALREADY_HAS_SALE");
+  if (order.items.some((item) => item.unitPrice === null)) throw new Error("ORDER_ITEM_PRICE_MISSING");
 
   const effectiveItems = order.items.map((item) => ({
     productId: item.productId,
     quantity: item.actualQuantity ?? item.quantity,
-    unitPrice: item.unitPrice,
+    unitPrice: item.unitPrice as Prisma.Decimal,
   }));
   const expectedTotal = money(effectiveItems.reduce((sum, item) => sum.add(decimal(item.quantity).mul(decimal(item.unitPrice))), new Prisma.Decimal(0)));
 
