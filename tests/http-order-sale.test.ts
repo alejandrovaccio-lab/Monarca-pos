@@ -32,7 +32,10 @@ function responseMock() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireBranchSession.mockResolvedValue({ userId: "cashier-authenticated", branchId: "branch-1" });
-  mocks.postCreateSaleFromOrder.mockResolvedValue({ order: { id: "order-1", status: "PAID" }, sale: { id: "sale-1", total: "34.40" }, usedQuantities: [] });
+  mocks.postCreateSaleFromOrder.mockResolvedValue({
+    status: 201,
+    body: { order: { id: "order-1", status: "PAID" }, sale: { id: "sale-1", total: "34.40" }, usedQuantities: [] },
+  });
 });
 
 describe("HTTP order to sale", () => {
