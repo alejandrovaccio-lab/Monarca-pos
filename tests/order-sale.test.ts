@@ -45,7 +45,7 @@ describe("order to sale", () => {
 
     expect(mocks.createSale).toHaveBeenCalledWith(expect.objectContaining({
       customerId: "customer-1",
-      items: [{ productId: "product-1", quantity: "1.72", unitPrice: "20.00" }],
+      items: [{ productId: "product-1", quantity: "1.7200", unitPrice: "20.00" }],
       payments: [{ method: "CASH", amount: "34.40" }],
     }));
     expect(mocks.attachSaleToOrder).toHaveBeenCalledWith({ branchId: "branch-1", orderId: "order-1", saleId: "sale-1" });
