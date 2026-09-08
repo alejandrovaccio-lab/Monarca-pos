@@ -17,12 +17,17 @@ export async function requireSession(token: string) {
     return null;
   }
 
+  const context = await getSessionContext(session.id);
+  if (!context || context.user.status === "INACTIVE") {
+    return null;
+  }
+
   await prisma.userSession.update({
     where: { id: session.id },
     data: { lastSeenAt: new Date() }
   });
 
-  return getSessionContext(session.id);
+  return context;
 }
 
 export async function requireBranchSession(token: string, branchId: string) {
