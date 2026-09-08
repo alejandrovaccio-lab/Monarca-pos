@@ -29,6 +29,7 @@ function transactionMock() {
 describe("role authorization", () => {
   it("allows a user with the required permission", async () => {
     db.user.findUnique.mockResolvedValue({
+      status: "ACTIVE",
       roles: [{ role: { permissions: [{ permission: { code: "SALE_CANCEL" } }] } }]
     });
     await expect(requirePermission("user-1", "SALE_CANCEL")).resolves.toBe(true);
@@ -36,9 +37,23 @@ describe("role authorization", () => {
 
   it("denies a user without the required permission", async () => {
     db.user.findUnique.mockResolvedValue({
+      status: "ACTIVE",
       roles: [{ role: { permissions: [] } }]
     });
     await expect(requirePermission("user-1", "SALE_CANCEL")).resolves.toBe(false);
+  });
+
+  it("denies all permissions to an inactive user even when the role grants them", async () => {
+    db.user.findUnique.mockResolvedValue({
+      status: "INACTIVE",
+      roles: [{ role: { permissions: [{ permission: { code: "SALE_CANCEL" } }] } }]
+    });
+    await expect(requirePermission("inactive-user-1", "SALE_CANCEL")).resolves.toBe(false);
+  });
+
+  it("denies permissions to a missing user", async () => {
+    db.user.findUnique.mockResolvedValue(null);
+    await expect(requirePermission("missing-user", "SALE_CANCEL")).resolves.toBe(false);
   });
 
   it("allows an active user with a designated senior role to approve", async () => {
