@@ -82,7 +82,12 @@ describe("role authorization", () => {
     await expect(canApproveAuthorization("missing-user")).resolves.toBe(false);
   });
 
-  it("creates a pending authorization request", async () => {
+  it("creates a pending authorization request for an active requester in the same organization and branch", async () => {
+    db.user.findUnique.mockResolvedValue({
+      status: "ACTIVE",
+      organizationId: "org-1",
+      branchAccess: [{ branchId: "branch-1" }]
+    });
     db.authorizationRequest.create.mockResolvedValue({ id: "auth-1", status: "PENDING" });
     const result = await requestAuthorization({
       organizationId: "org-1",
@@ -95,6 +100,57 @@ describe("role authorization", () => {
     });
     expect(result).toMatchObject({ id: "auth-1", status: "PENDING" });
     expect(db.authorizationRequest.create).toHaveBeenCalledOnce();
+  });
+
+  it("rejects authorization requests from an inactive or missing requester", async () => {
+    db.user.findUnique.mockResolvedValue({ status: "INACTIVE", organizationId: "org-1", branchAccess: [] });
+    await expect(requestAuthorization({
+      organizationId: "org-1", branchId: "branch-1", requestedById: "inactive-user", type: "SALE_CANCEL",
+      reason: "Prueba", entityType: "Sale"
+    })).rejects.toThrow("AUTHORIZATION_REQUESTER_REQUIRED");
+
+    db.user.findUnique.mockResolvedValue(null);
+    await expect(requestAuthorization({
+      organizationId: "org-1", branchId: "branch-1", requestedById: "missing-user", type: "SALE_CANCEL",
+      reason: "Prueba", entityType: "Sale"
+    })).rejects.toThrow("AUTHORIZATION_REQUESTER_REQUIRED");
+    expect(db.authorizationRequest.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects authorization requests outside the requester's organization", async () => {
+    db.user.findUnique.mockResolvedValue({
+      status: "ACTIVE", organizationId: "org-2", branchAccess: [{ branchId: "branch-1" }]
+    });
+
+    await expect(requestAuthorization({
+      organizationId: "org-1", branchId: "branch-1", requestedById: "user-2", type: "SALE_CANCEL",
+      reason: "Prueba", entityType: "Sale"
+    })).rejects.toThrow("AUTHORIZATION_SCOPE_FORBIDDEN");
+    expect(db.authorizationRequest.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects authorization requests for a branch the requester cannot access", async () => {
+    db.user.findUnique.mockResolvedValue({
+      status: "ACTIVE", organizationId: "org-1", branchAccess: [{ branchId: "branch-2" }]
+    });
+
+    await expect(requestAuthorization({
+      organizationId: "org-1", branchId: "branch-1", requestedById: "user-1", type: "SALE_CANCEL",
+      reason: "Prueba", entityType: "Sale"
+    })).rejects.toThrow("AUTHORIZATION_SCOPE_FORBIDDEN");
+    expect(db.authorizationRequest.create).not.toHaveBeenCalled();
+  });
+
+  it("allows a global authorization request within the requester's organization", async () => {
+    db.user.findUnique.mockResolvedValue({
+      status: "ACTIVE", organizationId: "org-1", branchAccess: []
+    });
+    db.authorizationRequest.create.mockResolvedValue({ id: "auth-global", status: "PENDING" });
+
+    await expect(requestAuthorization({
+      organizationId: "org-1", requestedById: "user-1", type: "ACCESS_CHANGE",
+      reason: "Prueba global", entityType: "User"
+    })).resolves.toMatchObject({ id: "auth-global", status: "PENDING" });
   });
 
   it("rejects resolution by a non-approver before loading the request", async () => {
