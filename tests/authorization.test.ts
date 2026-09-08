@@ -8,17 +8,23 @@ vi.mock("../src/lib/prisma", () => ({
       findUnique: vi.fn(),
       update: vi.fn()
     },
-    authorizationApproval: { create: vi.fn() }
+    authorizationApproval: { create: vi.fn() },
+    auditLog: { create: vi.fn() },
+    $transaction: vi.fn()
   }
 }));
 
 import { prisma } from "../src/lib/prisma";
-import { canApproveAuthorization, hasPermission, requestAuthorization } from "../src/core/authorization";
+import { canApproveAuthorization, hasPermission, requestAuthorization, resolveAuthorization } from "../src/core/authorization";
 import { requireAuthorizationApprover, requirePermission } from "../src/middleware/authorization";
 
 const db = prisma as any;
 
 beforeEach(() => vi.clearAllMocks());
+
+function transactionMock() {
+  db.$transaction.mockImplementation(async (callback: (tx: any) => unknown) => callback(db));
+}
 
 describe("role authorization", () => {
   it("allows a user with the required permission", async () => {
@@ -56,5 +62,84 @@ describe("role authorization", () => {
     });
     expect(result).toMatchObject({ id: "auth-1", status: "PENDING" });
     expect(db.authorizationRequest.create).toHaveBeenCalledOnce();
+  });
+
+  it("rejects resolution by a non-approver before loading the request", async () => {
+    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "CAJERO" } }] });
+
+    await expect(resolveAuthorization({ requestId: "auth-1", approverId: "cashier-1", decision: "APPROVED" }))
+      .rejects.toThrow("AUTHORIZATION_APPROVER_REQUIRED");
+    expect(db.authorizationRequest.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing authorization request", async () => {
+    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    db.authorizationRequest.findUnique.mockResolvedValue(null);
+
+    await expect(resolveAuthorization({ requestId: "missing", approverId: "manager-1", decision: "APPROVED" }))
+      .rejects.toThrow("AUTHORIZATION_NOT_FOUND");
+  });
+
+  it("prevents self-approval and preserves the pending request", async () => {
+    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    db.authorizationRequest.findUnique.mockResolvedValue({ id: "auth-1", requestedById: "manager-1", status: "PENDING" });
+
+    await expect(resolveAuthorization({ requestId: "auth-1", approverId: "manager-1", decision: "APPROVED" }))
+      .rejects.toThrow("SELF_APPROVAL_NOT_ALLOWED");
+    expect(db.authorizationApproval.create).not.toHaveBeenCalled();
+  });
+
+  it("does not resolve an authorization twice", async () => {
+    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "ADMIN" } }] });
+    db.authorizationRequest.findUnique.mockResolvedValue({ id: "auth-1", requestedById: "cashier-1", status: "APPROVED" });
+
+    await expect(resolveAuthorization({ requestId: "auth-1", approverId: "admin-1", decision: "REJECTED" }))
+      .rejects.toThrow("AUTHORIZATION_ALREADY_RESOLVED");
+  });
+
+  it("approves a request, records the approval, resolves the request, and audits it", async () => {
+    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    db.authorizationRequest.findUnique.mockResolvedValue({
+      id: "auth-1", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-1", status: "PENDING",
+      entityType: "Sale", entityId: "sale-1", beforeData: { status: "COMPLETED" }, requestedData: { status: "CANCELLED" }
+    });
+    db.authorizationApproval.create.mockResolvedValue({ id: "approval-1", decision: "APPROVED" });
+    db.authorizationRequest.update.mockResolvedValue({ id: "auth-1", status: "APPROVED", resolvedAt: new Date() });
+    db.auditLog.create.mockResolvedValue({ id: "audit-1" });
+    transactionMock();
+
+    const result = await resolveAuthorization({
+      requestId: "auth-1", approverId: "manager-1", decision: "APPROVED", notes: "Cliente presente en sucursal"
+    });
+
+    expect(result.approval).toMatchObject({ id: "approval-1", decision: "APPROVED" });
+    expect(result.request.status).toBe("APPROVED");
+    expect(db.authorizationApproval.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ authorizationRequestId: "auth-1", approverId: "manager-1", decision: "APPROVED", notes: "Cliente presente en sucursal" })
+    }));
+    expect(db.authorizationRequest.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "auth-1" }, data: expect.objectContaining({ status: "APPROVED" })
+    }));
+    expect(db.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ action: "AUTHORIZATION_APPROVED", entityType: "Sale", entityId: "sale-1", beforeData: { status: "COMPLETED" }, afterData: { status: "CANCELLED" } })
+    }));
+  });
+
+  it("supports rejection with notes and records the rejection audit", async () => {
+    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "ENCARGADO_TIENDA" } }] });
+    db.authorizationRequest.findUnique.mockResolvedValue({
+      id: "auth-2", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-2", status: "PENDING",
+      entityType: "Sale", entityId: "sale-2", beforeData: { status: "COMPLETED" }, requestedData: { status: "REFUNDED" }
+    });
+    db.authorizationApproval.create.mockResolvedValue({ id: "approval-2", decision: "REJECTED" });
+    db.authorizationRequest.update.mockResolvedValue({ id: "auth-2", status: "REJECTED", resolvedAt: new Date() });
+    db.auditLog.create.mockResolvedValue({ id: "audit-2" });
+    transactionMock();
+
+    const result = await resolveAuthorization({ requestId: "auth-2", approverId: "store-manager-1", decision: "REJECTED", notes: "No procede sin comprobante" });
+
+    expect(result.approval.decision).toBe("REJECTED");
+    expect(result.request.status).toBe("REJECTED");
+    expect(db.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ action: "AUTHORIZATION_REJECTED" }) }));
   });
 });
