@@ -39,27 +39,27 @@ export async function resolveAuthorization(input: {
 
   const status = input.decision;
   return prisma.$transaction(async (tx) => {
-    // Re-read inside the transaction so a request cannot be resolved twice
-    // when two approvers act concurrently after both saw it as PENDING.
-    const currentRequest = await tx.authorizationRequest.findUnique({ where: { id: request.id } });
-    if (!currentRequest) throw new Error("AUTHORIZATION_NOT_FOUND");
-    if (currentRequest.status !== "PENDING") throw new Error("AUTHORIZATION_ALREADY_RESOLVED");
+    // Atomically claim the pending request. Only one concurrent approver can
+    // change a PENDING request, so the second approver receives a conflict.
+    const claimed = await tx.authorizationRequest.updateMany({
+      where: { id: request.id, status: "PENDING" },
+      data: { status, resolvedAt: new Date() }
+    });
+    if (claimed.count !== 1) throw new Error("AUTHORIZATION_ALREADY_RESOLVED");
 
     const approval = await tx.authorizationApproval.create({ data: {
-      authorizationRequestId: currentRequest.id,
+      authorizationRequestId: request.id,
       approverId: input.approverId,
       decision: status,
       notes: input.notes
     }});
-    const resolved = await tx.authorizationRequest.update({
-      where: { id: currentRequest.id }, data: { status, resolvedAt: new Date() }
-    });
     await tx.auditLog.create({ data: {
-      organizationId: currentRequest.organizationId, branchId: currentRequest.branchId, userId: input.approverId,
-      action: `AUTHORIZATION_${status}`, entityType: currentRequest.entityType, entityId: currentRequest.entityId,
-      beforeData: currentRequest.beforeData == null ? undefined : currentRequest.beforeData,
-      afterData: currentRequest.requestedData == null ? undefined : currentRequest.requestedData
+      organizationId: request.organizationId, branchId: request.branchId, userId: input.approverId,
+      action: `AUTHORIZATION_${status}`, entityType: request.entityType, entityId: request.entityId,
+      beforeData: request.beforeData == null ? undefined : request.beforeData,
+      afterData: request.requestedData == null ? undefined : request.requestedData
     }});
-    return { approval, request: resolved };
+
+    return { approval, request: { ...request, status, resolvedAt: new Date() } };
   });
 }
