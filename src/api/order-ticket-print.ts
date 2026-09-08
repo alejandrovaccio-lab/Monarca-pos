@@ -22,7 +22,7 @@ export async function getOrderTicketPrintQuery(input: { orderId: string; branchI
 
   const ticket: PrintableOrderTicket = {
     orderId: order.id,
-    requestedAt: formatDate(order.requestedAt),
+    requestedAt: formatDate(order.requestedAt ?? order.createdAt ?? new Date()),
     channel: order.channel,
     status: order.status,
     branch: { name: order.branch.name, code: order.branch.code },
