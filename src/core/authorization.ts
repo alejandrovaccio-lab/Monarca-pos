@@ -12,7 +12,8 @@ export async function hasPermission(userId: string, permissionCode: string) {
 
 export async function canApproveAuthorization(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId }, include: { roles: { include: { role: true } } } });
-  return !!user?.roles.some(({ role }) => APPROVER_ROLES.has(role.name));
+  if (!user || user.status !== "ACTIVE") return false;
+  return user.roles.some(({ role }) => APPROVER_ROLES.has(role.name));
 }
 
 export async function requestAuthorization(input: {
