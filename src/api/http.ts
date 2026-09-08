@@ -11,7 +11,9 @@ import { getOrders, postCreateOrder, postOrderAdjustmentExecution, postOrderAdju
 import { postOrderIntake } from "./order-intake";
 import { postCreateSaleFromOrder } from "./order-sale";
 import { getCustomerQuery, getCustomers, patchCustomer, postCreateCustomer } from "./customers";
+import { postAuthorizationDecision, postAuthorizationRequest } from "./authorization";
 import { requireBranchSession } from "../middleware/auth";
+import { requireBranchAuthorizationApprover } from "../middleware/authorization";
 
 const COOKIE_NAME = "monarca_session";
 function readCookies(request: IncomingMessage) { const header = request.headers.cookie ?? ""; return Object.fromEntries(header.split(";").filter(Boolean).map((part) => { const index = part.indexOf("="); return [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim())]; })); }
@@ -31,6 +33,42 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (method === "GET" && url.pathname === "/auth/me") { const result = await getMe(sessionToken(request)); sendJson(response, result.status, result.body); return; }
     if (method === "POST" && url.pathname === "/auth/logout") { const result = await postLogout(sessionToken(request)); sendJson(response, result.status, result.body, { "set-cookie": clearSessionCookie() }); return; }
 
+    if (method === "POST" && url.pathname === "/authorizations") {
+      const body = await readJson(request);
+      const auth = await requireOperationalBranch(request, bodyBranchId(body));
+      if (!auth.ok) { sendJson(response, auth.status, auth.body); return; }
+      const input = body as Record<string, unknown>;
+      const result = await postAuthorizationRequest({
+        organizationId: auth.user.organizationId,
+        branchId: auth.branchId,
+        requestedById: auth.userId,
+        type: typeof input.type === "string" ? input.type : "",
+        reason: typeof input.reason === "string" ? input.reason : "",
+        entityType: typeof input.entityType === "string" ? input.entityType : "",
+        entityId: typeof input.entityId === "string" ? input.entityId : undefined,
+        beforeData: input.beforeData,
+        requestedData: input.requestedData
+      });
+      sendJson(response, result.status, result.body); return;
+    }
+
+    const authorizationDecisionMatch = method === "POST" ? url.pathname.match(/^\/authorizations\/([^/]+)\/decision$/) : null;
+    if (authorizationDecisionMatch) {
+      const body = await readJson(request);
+      const auth = await requireBranchAuthorizationApprover(sessionToken(request), bodyBranchId(body) ?? "");
+      if (!auth) { sendJson(response, 403, { error: "AUTHORIZATION_APPROVER_REQUIRED" }); return; }
+      const input = body as Record<string, unknown>;
+      const decision = input.decision === "APPROVED" || input.decision === "REJECTED" ? input.decision : undefined;
+      if (!decision) { sendJson(response, 400, { error: "DECISION_REQUIRED" }); return; }
+      const result = await postAuthorizationDecision({
+        requestId: decodeURIComponent(authorizationDecisionMatch[1]),
+        approverId: auth.userId,
+        decision,
+        notes: typeof input.notes === "string" ? input.notes : undefined
+      });
+      sendJson(response, result.status, result.body); return;
+    }
+
     if (method === "GET" && url.pathname === "/inventory") { const branchId = url.searchParams.get("branchId") ?? undefined; const auth = await requireOperationalBranch(request, branchId); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const productId = url.searchParams.get("productId"); const result = productId ? await getInventory({ branchId: auth.branchId, productId }) : await getInventoryList({ branchId: auth.branchId, search: url.searchParams.get("search") ?? undefined, limit: queryNumber(url.searchParams.get("limit"), 50) }); sendJson(response, result.status, result.body); return; }
     if (method === "GET" && url.pathname === "/inventory/movements") { const branchId = url.searchParams.get("branchId") ?? undefined; const auth = await requireOperationalBranch(request, branchId); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const result = await getInventoryMovements({ branchId: auth.branchId, productId: url.searchParams.get("productId") ?? undefined, limit: queryNumber(url.searchParams.get("limit"), 100) }); sendJson(response, result.status, result.body); return; }
     if (method === "GET" && url.pathname === "/inventory/replenishment") { const branchId = url.searchParams.get("branchId") ?? undefined; const auth = await requireOperationalBranch(request, branchId); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const result = await getInventoryReplenishmentQuery({ branchId: auth.branchId, productId: url.searchParams.get("productId") ?? undefined, days: queryNumber(url.searchParams.get("days"), 30), limit: queryNumber(url.searchParams.get("limit"), 200) }); sendJson(response, result.status, result.body); return; }
@@ -40,7 +78,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (method === "POST" && url.pathname === "/registers/open") { const body = await readJson(request); const auth = await requireOperationalBranch(request, bodyBranchId(body)); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const input = body as { registerId?: unknown; openingFloat?: unknown }; const result = await postOpenRegister({ branchId: auth.branchId, registerId: typeof input.registerId === "string" ? input.registerId : "", openedById: auth.userId, openingFloat: typeof input.openingFloat === "number" ? input.openingFloat : Number(input.openingFloat) }); sendJson(response, result.status, result.body); return; }
     if (method === "POST" && url.pathname === "/registers/close") { const body = await readJson(request); const input = body as { sessionId?: unknown; closingTotal?: unknown; branchId?: unknown }; const branchId = typeof input.branchId === "string" ? input.branchId : undefined; const auth = await requireOperationalBranch(request, branchId); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const result = await postCloseRegister({ sessionId: typeof input.sessionId === "string" ? input.sessionId : "", closedById: auth.userId, closingTotal: typeof input.closingTotal === "number" ? input.closingTotal : Number(input.closingTotal) }); sendJson(response, result.status, result.body); return; }
 
-    if (method === "POST" && url.pathname === "/sales") { const body = await readJson(request); const auth = await requireOperationalBranch(request, bodyBranchId(body)); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const input = body as Record<string, unknown>; const result = await postCreateSale({ branchId: auth.branchId, registerSessionId: typeof input.registerSessionId === "string" ? input.registerSessionId : "", cashierId: auth.userId, sellerId: typeof input.sellerId === "string" ? input.sellerId : undefined, customerId: typeof input.customerId === "string" ? input.customerId : undefined, folio: typeof input.folio === "string" ? input.folio : undefined, soldAt: typeof input.soldAt === "string" ? input.soldAt : undefined, items: Array.isArray(input.items) ? input.items as any : [], payments: Array.isArray(input.payments) ? input.payments as any : [] }); sendJson(response, result.status, result.body); return; }
+    if (method === "POST" && url.pathname === "/sales") { const body = await readJson(request); const auth = await requireOperationalBranch(request, bodyBranchId(body)); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const input = body as Record<string, unknown>; const result = await postCreateSale({ branchId: auth.branchId, registerSessionId: typeof input.registerSessionId === "string" ? input.registerSessionId : "", cashierId: auth.userId, sellerId: typeof input.sellerId === "string" ? input.sellerId : undefined, customerId: typeof input.customerId === "string" ? input.customerId : undefined, folio: typeof input.folio === "string' ? input.folio : undefined, soldAt: typeof input.soldAt === "string" ? input.soldAt : undefined, items: Array.isArray(input.items) ? input.items as any : [], payments: Array.isArray(input.payments) ? input.payments as any : [] }); sendJson(response, result.status, result.body); return; }
 
     if (method === "POST" && url.pathname === "/customers") { const body = await readJson(request); const auth = await requireOperationalBranch(request, bodyBranchId(body)); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const input = body as Record<string, unknown>; const result = await postCreateCustomer({ branchId: auth.branchId, actorId: auth.userId, name: typeof input.name === "string" ? input.name : "", phone: typeof input.phone === "string" ? input.phone : undefined, email: typeof input.email === "string" ? input.email : undefined, taxId: typeof input.taxId === "string" ? input.taxId : undefined }); sendJson(response, result.status, result.body); return; }
     if (method === "GET" && url.pathname === "/customers") { const branchId = url.searchParams.get("branchId") ?? undefined; const auth = await requireOperationalBranch(request, branchId); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const result = await getCustomers({ branchId: auth.branchId, actorId: auth.userId, search: url.searchParams.get("search") ?? undefined, phone: url.searchParams.get("phone") ?? undefined, membershipCode: url.searchParams.get("membershipCode") ?? undefined, limit: queryNumber(url.searchParams.get("limit"), 50) }); sendJson(response, result.status, result.body); return; }
@@ -61,7 +99,6 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     if (orderSaleMatch) { const body = await readJson(request); const auth = await requireOperationalBranch(request, bodyBranchId(body)); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const input = body as Record<string, unknown>; const result = await postCreateSaleFromOrder({ branchId: auth.branchId, orderId: decodeURIComponent(orderSaleMatch[1]), registerSessionId: typeof input.registerSessionId === "string" ? input.registerSessionId : "", cashierId: auth.userId, sellerId: typeof input.sellerId === "string" ? input.sellerId : undefined, payments: Array.isArray(input.payments) ? input.payments as any : [], soldAt: typeof input.soldAt === "string" ? input.soldAt : undefined }); sendJson(response, result.status, result.body); return; }
     const orderSaleLinkMatch = method === "POST" ? url.pathname.match(/^\/orders\/([^/]+)\/sale\/link$/) : null;
     if (orderSaleLinkMatch) { const body = await readJson(request); const auth = await requireOperationalBranch(request, bodyBranchId(body)); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const input = body as Record<string, unknown>; const result = await postOrderSaleLink({ branchId: auth.branchId, orderId: decodeURIComponent(orderSaleLinkMatch[1]), saleId: typeof input.saleId === "string" ? input.saleId : "" }); sendJson(response, result.status, result.body); return; }
-
     const saleTicketPrintMatch = method === "GET" ? url.pathname.match(/^\/sales\/([^/]+)\/ticket\/print$/) : null;
     if (saleTicketPrintMatch) { const branchId = url.searchParams.get("branchId") ?? undefined; const auth = await requireOperationalBranch(request, branchId); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const result = await getSaleTicketPrintQuery({ saleId: decodeURIComponent(saleTicketPrintMatch[1]), branchId: auth.branchId }); sendJson(response, result.status, result.body); return; }
     const saleTicketMatch = method === "GET" ? url.pathname.match(/^\/sales\/([^/]+)\/ticket$/) : null;
