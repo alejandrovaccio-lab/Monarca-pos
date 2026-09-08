@@ -1,4 +1,3 @@
-import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { formatOrderTicketForThermal, type PrintableOrderTicket } from "../core/order-ticket-print";
 
@@ -15,10 +14,7 @@ export async function getOrderTicketPrintQuery(input: { orderId: string; branchI
       branch: { select: { id: true, name: true, code: true } },
       customer: { select: { name: true, phone: true } },
       preparedBy: { select: { name: true } },
-      items: {
-        include: { product: { select: { name: true } } },
-        orderBy: { createdAt: "asc" },
-      },
+      items: { include: { product: { select: { name: true } } } },
     },
   });
 
