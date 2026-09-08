@@ -99,6 +99,22 @@ export async function executeApprovedInventoryAdjustment(input: {
     throw new Error("AUTHORIZATION_ENTITY_INVALID");
   }
 
+  const executor = await prisma.user.findUnique({
+    where: { id: input.executorId },
+    select: {
+      id: true,
+      organizationId: true,
+      status: true,
+      branchAccess: { where: { branchId: authorization.branchId ?? "" }, select: { branchId: true } },
+    },
+  });
+  if (!executor || executor.status !== "ACTIVE" || executor.organizationId !== authorization.organizationId) {
+    throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+  }
+  if (authorization.branchId && !executor.branchAccess.length) {
+    throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+  }
+
   const requested = authorization.requestedData as {
     branchId?: string;
     productId?: string;
@@ -138,6 +154,16 @@ export async function executeApprovedInventoryAdjustment(input: {
   if (expectedDelta !== delta) throw new Error("AUTHORIZATION_TARGET_INVALID");
 
   return prisma.$transaction(async (tx) => {
+    // Serialize execution for this authorization so two concurrent executors
+    // cannot both apply the same approved request.
+    await tx.$queryRaw`SELECT "id" FROM "AuthorizationRequest" WHERE "id" = ${authorization.id} FOR UPDATE`;
+
+    const alreadyExecuted = await tx.inventoryMovement.findFirst({
+      where: { referenceType: `MANUAL_${adjustmentType}`, referenceId: authorization.id },
+      select: { id: true },
+    });
+    if (alreadyExecuted) throw new Error("AUTHORIZATION_ALREADY_EXECUTED");
+
     const employee = await tx.employee.findUnique({
       where: { id: employeeId },
       select: { organizationId: true },
