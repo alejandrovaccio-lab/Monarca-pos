@@ -15,6 +15,7 @@ export type SalePaymentInput = {
 };
 
 const PAYMENT_METHODS = new Set<SalePaymentInput["method"]>(["CASH", "CARD", "TRANSFER", "OTHER"]);
+type SaleDb = typeof prisma | Prisma.TransactionClient;
 
 function decimal(value: number | string) {
   try {
@@ -59,7 +60,7 @@ export async function createSale(input: {
   soldAt?: string | Date;
   items: SaleItemInput[];
   payments: SalePaymentInput[];
-}) {
+}, db: SaleDb = prisma) {
   if (!input.branchId || !input.registerSessionId || !input.cashierId) throw new Error("SALE_CONTEXT_REQUIRED");
   if (!input.items.length) throw new Error("SALE_ITEMS_REQUIRED");
   if (!input.payments.length) throw new Error("SALE_PAYMENTS_REQUIRED");
@@ -68,23 +69,23 @@ export async function createSale(input: {
   if (Number.isNaN(soldAt.getTime())) throw new Error("SALE_DATE_INVALID");
 
   const [branch, session, cashier, seller, customer] = await Promise.all([
-    prisma.branch.findUnique({ where: { id: input.branchId }, select: { id: true, organizationId: true } }),
-    prisma.registerSession.findUnique({
+    db.branch.findUnique({ where: { id: input.branchId }, select: { id: true, organizationId: true } }),
+    db.registerSession.findUnique({
       where: { id: input.registerSessionId },
       select: { id: true, closedAt: true, register: { select: { branchId: true, status: true } } },
     }),
-    prisma.user.findUnique({
+    db.user.findUnique({
       where: { id: input.cashierId },
       select: { id: true, organizationId: true, status: true, branchAccess: { where: { branchId: input.branchId }, select: { branchId: true } } },
     }),
     input.sellerId
-      ? prisma.user.findUnique({
+      ? db.user.findUnique({
           where: { id: input.sellerId },
           select: { id: true, organizationId: true, status: true, branchAccess: { where: { branchId: input.branchId }, select: { branchId: true } } },
         })
       : null,
     input.customerId
-      ? prisma.customer.findUnique({ where: { id: input.customerId }, select: { id: true, organizationId: true } })
+      ? db.customer.findUnique({ where: { id: input.customerId }, select: { id: true, organizationId: true } })
       : null,
   ]);
 
@@ -112,7 +113,7 @@ export async function createSale(input: {
   for (const item of input.items) {
     if (!item.productId) throw new Error("SALE_ITEM_INVALID");
     const quantity = positiveDecimal(item.quantity, "SALE_QUANTITY_INVALID");
-    const product = await prisma.product.findUnique({
+    const product = await db.product.findUnique({
       where: { id: item.productId },
       select: {
         id: true,
@@ -156,7 +157,7 @@ export async function createSale(input: {
   const folio = input.folio?.trim() || generateFolio();
   if (!folio) throw new Error("SALE_FOLIO_REQUIRED");
 
-  return prisma.$transaction(async (tx) => {
+  const execute = async (tx: Prisma.TransactionClient) => {
     for (const item of preparedItems) {
       const changed = await tx.inventoryBalance.updateMany({
         where: { branchId: input.branchId, productId: item.productId, quantity: { gte: item.quantity } },
@@ -211,5 +212,7 @@ export async function createSale(input: {
     });
 
     return { ...sale, total: formatMoney(total) };
-  });
+  };
+
+  return db === prisma ? prisma.$transaction(execute) : execute(db as Prisma.TransactionClient);
 }
