@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { requireBranchSession } = vi.hoisted(() => ({
   requireBranchSession: vi.fn(),
@@ -25,6 +25,10 @@ describe("authorization middleware boundary", () => {
     branchId: "branch-1",
     user: { id: "user-1", status: "ACTIVE" },
   };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   it("returns authenticated context when session, branch and permission are valid", async () => {
     requireBranchSession.mockResolvedValue(context);
