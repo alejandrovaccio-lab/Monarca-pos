@@ -15,7 +15,7 @@ vi.mock("../src/lib/prisma", () => ({
 }));
 
 import { prisma } from "../src/lib/prisma";
-import { canApproveAuthorization, hasPermission, requestAuthorization, resolveAuthorization } from "../src/core/authorization";
+import { canApproveAuthorization, requestAuthorization, resolveAuthorization } from "../src/core/authorization";
 import { requireAuthorizationApprover, requirePermission } from "../src/middleware/authorization";
 
 const db = prisma as any;
@@ -41,12 +41,20 @@ describe("role authorization", () => {
     await expect(requirePermission("user-1", "SALE_CANCEL")).resolves.toBe(false);
   });
 
-  it("allows only designated senior roles to approve", async () => {
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+  it("allows an active user with a designated senior role to approve", async () => {
+    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "GERENTE" } }] });
     await expect(requireAuthorizationApprover("manager-1")).resolves.toBe(true);
 
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "CAJERO" } }] });
+    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "CAJERO" } }] });
     await expect(canApproveAuthorization("cashier-1")).resolves.toBe(false);
+  });
+
+  it("denies approval to inactive or missing users even when a senior role is present", async () => {
+    db.user.findUnique.mockResolvedValue({ status: "INACTIVE", roles: [{ role: { name: "GERENTE" } }] });
+    await expect(canApproveAuthorization("inactive-manager-1")).resolves.toBe(false);
+
+    db.user.findUnique.mockResolvedValue(null);
+    await expect(canApproveAuthorization("missing-user")).resolves.toBe(false);
   });
 
   it("creates a pending authorization request", async () => {
@@ -65,15 +73,23 @@ describe("role authorization", () => {
   });
 
   it("rejects resolution by a non-approver before loading the request", async () => {
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "CAJERO" } }] });
+    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "CAJERO" } }] });
 
     await expect(resolveAuthorization({ requestId: "auth-1", approverId: "cashier-1", decision: "APPROVED" }))
       .rejects.toThrow("AUTHORIZATION_APPROVER_REQUIRED");
     expect(db.authorizationRequest.findUnique).not.toHaveBeenCalled();
   });
 
+  it("rejects resolution by an inactive approver", async () => {
+    db.user.findUnique.mockResolvedValue({ status: "INACTIVE", roles: [{ role: { name: "GERENTE" } }] });
+
+    await expect(resolveAuthorization({ requestId: "auth-1", approverId: "inactive-manager-1", decision: "APPROVED" }))
+      .rejects.toThrow("AUTHORIZATION_APPROVER_REQUIRED");
+    expect(db.authorizationRequest.findUnique).not.toHaveBeenCalled();
+  });
+
   it("rejects a missing authorization request", async () => {
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "GERENTE" } }] });
     db.authorizationRequest.findUnique.mockResolvedValue(null);
 
     await expect(resolveAuthorization({ requestId: "missing", approverId: "manager-1", decision: "APPROVED" }))
@@ -81,7 +97,7 @@ describe("role authorization", () => {
   });
 
   it("prevents self-approval and preserves the pending request", async () => {
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "GERENTE" } }] });
     db.authorizationRequest.findUnique.mockResolvedValue({ id: "auth-1", requestedById: "manager-1", status: "PENDING" });
 
     await expect(resolveAuthorization({ requestId: "auth-1", approverId: "manager-1", decision: "APPROVED" }))
@@ -90,7 +106,7 @@ describe("role authorization", () => {
   });
 
   it("does not resolve an authorization twice", async () => {
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "ADMIN" } }] });
+    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "ADMIN" } }] });
     db.authorizationRequest.findUnique.mockResolvedValue({ id: "auth-1", requestedById: "cashier-1", status: "APPROVED" });
 
     await expect(resolveAuthorization({ requestId: "auth-1", approverId: "admin-1", decision: "REJECTED" }))
@@ -98,7 +114,7 @@ describe("role authorization", () => {
   });
 
   it("approves a request, records the approval, resolves the request, and audits it", async () => {
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "GERENTE" } }] });
     db.authorizationRequest.findUnique.mockResolvedValue({
       id: "auth-1", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-1", status: "PENDING",
       entityType: "Sale", entityId: "sale-1", beforeData: { status: "COMPLETED" }, requestedData: { status: "CANCELLED" }
@@ -126,7 +142,7 @@ describe("role authorization", () => {
   });
 
   it("supports rejection with notes and records the rejection audit", async () => {
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "ENCARGADO_TIENDA" } }] });
+    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "ENCARGADO_TIENDA" } }] });
     db.authorizationRequest.findUnique.mockResolvedValue({
       id: "auth-2", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-2", status: "PENDING",
       entityType: "Sale", entityId: "sale-2", beforeData: { status: "COMPLETED" }, requestedData: { status: "REFUNDED" }
