@@ -113,6 +113,18 @@ describe("role authorization", () => {
       .rejects.toThrow("AUTHORIZATION_ALREADY_RESOLVED");
   });
 
+  it("rechecks the request inside the transaction before creating an approval", async () => {
+    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "GERENTE" } }] });
+    db.authorizationRequest.findUnique
+      .mockResolvedValueOnce({ id: "auth-1", requestedById: "cashier-1", status: "PENDING" })
+      .mockResolvedValueOnce({ id: "auth-1", requestedById: "cashier-1", status: "APPROVED" });
+    transactionMock();
+
+    await expect(resolveAuthorization({ requestId: "auth-1", approverId: "manager-1", decision: "APPROVED" }))
+      .rejects.toThrow("AUTHORIZATION_ALREADY_RESOLVED");
+    expect(db.authorizationApproval.create).not.toHaveBeenCalled();
+  });
+
   it("approves a request, records the approval, resolves the request, and audits it", async () => {
     db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "GERENTE" } }] });
     db.authorizationRequest.findUnique.mockResolvedValue({
