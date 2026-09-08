@@ -6,8 +6,7 @@ vi.mock("../src/lib/prisma", () => ({
     authorizationRequest: {
       create: vi.fn(),
       findUnique: vi.fn(),
-      update: vi.fn(),
-      updateMany: vi.fn()
+      update: vi.fn()
     },
     authorizationApproval: { create: vi.fn() },
     auditLog: { create: vi.fn() },
@@ -114,15 +113,15 @@ describe("role authorization", () => {
       .rejects.toThrow("AUTHORIZATION_ALREADY_RESOLVED");
   });
 
-  it("rejects a concurrent resolution when the atomic pending claim updates zero rows", async () => {
+  it("rejects a concurrent resolution when the atomic pending claim is already resolved", async () => {
     db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "GERENTE" } }] });
     db.authorizationRequest.findUnique.mockResolvedValue({ id: "auth-1", requestedById: "cashier-1", status: "PENDING" });
-    db.authorizationRequest.updateMany.mockResolvedValue({ count: 0 });
+    db.authorizationRequest.update.mockRejectedValue({ code: "P2025" });
     transactionMock();
 
     await expect(resolveAuthorization({ requestId: "auth-1", approverId: "manager-1", decision: "APPROVED" }))
       .rejects.toThrow("AUTHORIZATION_ALREADY_RESOLVED");
-    expect(db.authorizationRequest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(db.authorizationRequest.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "auth-1", status: "PENDING" }
     }));
     expect(db.authorizationApproval.create).not.toHaveBeenCalled();
@@ -134,7 +133,7 @@ describe("role authorization", () => {
       id: "auth-1", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-1", status: "PENDING",
       entityType: "Sale", entityId: "sale-1", beforeData: { status: "COMPLETED" }, requestedData: { status: "CANCELLED" }
     });
-    db.authorizationRequest.updateMany.mockResolvedValue({ count: 1 });
+    db.authorizationRequest.update.mockResolvedValue({ id: "auth-1", status: "APPROVED", resolvedAt: new Date() });
     db.authorizationApproval.create.mockResolvedValue({ id: "approval-1", decision: "APPROVED" });
     db.auditLog.create.mockResolvedValue({ id: "audit-1" });
     transactionMock();
@@ -145,7 +144,7 @@ describe("role authorization", () => {
 
     expect(result.approval).toMatchObject({ id: "approval-1", decision: "APPROVED" });
     expect(result.request.status).toBe("APPROVED");
-    expect(db.authorizationRequest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(db.authorizationRequest.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: "auth-1", status: "PENDING" }, data: expect.objectContaining({ status: "APPROVED" })
     }));
     expect(db.authorizationApproval.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -162,7 +161,7 @@ describe("role authorization", () => {
       id: "auth-2", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-2", status: "PENDING",
       entityType: "Sale", entityId: "sale-2", beforeData: { status: "COMPLETED" }, requestedData: { status: "REFUNDED" }
     });
-    db.authorizationRequest.updateMany.mockResolvedValue({ count: 1 });
+    db.authorizationRequest.update.mockResolvedValue({ id: "auth-2", status: "REJECTED", resolvedAt: new Date() });
     db.authorizationApproval.create.mockResolvedValue({ id: "approval-2", decision: "REJECTED" });
     db.auditLog.create.mockResolvedValue({ id: "audit-2" });
     transactionMock();
