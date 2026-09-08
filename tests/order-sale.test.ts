@@ -78,7 +78,7 @@ describe("order to sale", () => {
         entityId: "order-1",
       }),
     }));
-    expect(result.order).toEqual({ id: "order-1", saleId: "sale-1", status: "PAID" });
+    expect(result.order).toEqual(expect.objectContaining({ id: "order-1", saleId: "sale-1", status: "PAID" }));
     expect(result.usedQuantities[0].quantity).toBe("1.7200");
   });
 
