@@ -7,7 +7,8 @@ export async function hasPermission(userId: string, permissionCode: string) {
     where: { id: userId },
     include: { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } } }
   });
-  return !!user?.roles.some(({ role }) => role.permissions.some(({ permission }) => permission.code === permissionCode));
+  if (!user || user.status === "INACTIVE") return false;
+  return !!user.roles.some(({ role }) => role.permissions.some(({ permission }) => permission.code === permissionCode));
 }
 
 export async function canApproveAuthorization(userId: string) {
