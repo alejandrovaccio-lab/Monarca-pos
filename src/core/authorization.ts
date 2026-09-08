@@ -21,6 +21,20 @@ export async function requestAuthorization(input: {
   organizationId: string; branchId?: string; requestedById: string; type: string; reason: string;
   entityType: string; entityId?: string; beforeData?: unknown; requestedData?: unknown;
 }) {
+  const requester = await prisma.user.findUnique({
+    where: { id: input.requestedById },
+    include: { branchAccess: true }
+  });
+  if (!requester || requester.status === "INACTIVE") {
+    throw new Error("AUTHORIZATION_REQUESTER_REQUIRED");
+  }
+  if (requester.organizationId !== input.organizationId) {
+    throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+  }
+  if (input.branchId && !requester.branchAccess.some(({ branchId }) => branchId === input.branchId)) {
+    throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+  }
+
   return prisma.authorizationRequest.create({ data: {
     organizationId: input.organizationId, branchId: input.branchId, requestedById: input.requestedById,
     type: input.type as any, reason: input.reason, entityType: input.entityType, entityId: input.entityId,
