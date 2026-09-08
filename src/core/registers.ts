@@ -67,23 +67,36 @@ export async function closeRegisterSession(input: { sessionId: string; closedByI
   if (!closer || closer.status !== "ACTIVE" || closer.organizationId !== session.register.branch.organizationId) throw new Error("USER_NOT_AUTHORIZED");
   if (!closer.branchAccess.length) throw new Error("BRANCH_ACCESS_REQUIRED");
 
-  // Only completed cash sales add cash. Authorized cancellations/refunds reverse
-  // the cash actually received, while card/transfer/other payments never enter
-  // the physical-cash reconciliation.
-  const payments = await prisma.payment.findMany({
-    where: { sale: { registerSessionId: session.id, status: { in: ["COMPLETED", "CANCELLED", "REFUNDED"] } }, method: "CASH" },
-    select: { amount: true, sale: { select: { status: true } } },
-  });
-  const cashSales = payments
-    .filter((payment) => payment.sale.status === "COMPLETED")
-    .reduce((sum, payment) => sum + Number(payment.amount), 0);
-  const cashReversals = payments
-    .filter((payment) => payment.sale.status === "CANCELLED" || payment.sale.status === "REFUNDED")
-    .reduce((sum, payment) => sum + Number(payment.amount), 0);
-  const expectedCash = Number((Number(session.openingFloat) + cashSales - cashReversals).toFixed(2));
-  const variance = Number((input.closingTotal - expectedCash).toFixed(2));
-
   return prisma.$transaction(async (tx) => {
+    // Serialize close against authorized cash movements for this session.
+    await tx.$queryRaw`SELECT "id" FROM "RegisterSession" WHERE "id" = ${session.id} FOR UPDATE`;
+
+    // Only completed cash sales add cash. Authorized cancellations/refunds reverse
+    // the cash actually received, while card/transfer/other payments never enter
+    // the physical-cash reconciliation.
+    const payments = await tx.payment.findMany({
+      where: { sale: { registerSessionId: session.id, status: { in: ["COMPLETED", "CANCELLED", "REFUNDED"] } }, method: "CASH" },
+      select: { amount: true, sale: { select: { status: true } } },
+    });
+    const cashSales = payments
+      .filter((payment) => payment.sale.status === "COMPLETED")
+      .reduce((sum, payment) => sum + Number(payment.amount), 0);
+    const cashReversals = payments
+      .filter((payment) => payment.sale.status === "CANCELLED" || payment.sale.status === "REFUNDED")
+      .reduce((sum, payment) => sum + Number(payment.amount), 0);
+
+    const cashMovementRows = await tx.$queryRaw<Array<{ cashIn: unknown; cashOut: unknown }>>`
+      SELECT
+        COALESCE(SUM(CASE WHEN "type" = 'CASH_IN' THEN "amount" ELSE 0 END), 0) AS "cashIn",
+        COALESCE(SUM(CASE WHEN "type" = 'CASH_OUT' THEN "amount" ELSE 0 END), 0) AS "cashOut"
+      FROM "CashMovement"
+      WHERE "registerSessionId" = ${session.id}
+    `;
+    const cashIn = Number(cashMovementRows[0]?.cashIn ?? 0);
+    const cashOut = Number(cashMovementRows[0]?.cashOut ?? 0);
+    const expectedCash = Number((Number(session.openingFloat) + cashSales - cashReversals + cashIn - cashOut).toFixed(2));
+    const variance = Number((input.closingTotal - expectedCash).toFixed(2));
+
     const closed = await tx.registerSession.updateMany({
       where: { id: session.id, closedAt: null },
       data: { closedAt: new Date(), closedById: input.closedById, closingTotal: input.closingTotal },
@@ -104,11 +117,11 @@ export async function closeRegisterSession(input: { sessionId: string; closedByI
         action: "REGISTER_CLOSE",
         entityType: "RegisterSession",
         entityId: session.id,
-        beforeData: { openingFloat: Number(session.openingFloat), expectedCash, cashSales, cashReversals },
+        beforeData: { openingFloat: Number(session.openingFloat), expectedCash, cashSales, cashReversals, cashIn, cashOut },
         afterData: { closingTotal: input.closingTotal, variance },
       },
     });
 
-    return { ...session, closedAt: new Date(), closedById: input.closedById, closingTotal: input.closingTotal, expectedCash, cashSales, cashReversals, variance };
+    return { ...session, closedAt: new Date(), closedById: input.closedById, closingTotal: input.closingTotal, expectedCash, cashSales, cashReversals, cashIn, cashOut, variance };
   });
 }
