@@ -24,7 +24,20 @@ import { executeApprovedSaleChange, requestSaleChange } from "../src/core/sales"
 
 const db = prisma as any;
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  db.user.findUnique.mockImplementation(({ where }: any) => {
+    if (where?.id === "cashier-1") {
+      return Promise.resolve({
+        id: "cashier-1",
+        organizationId: "org-1",
+        status: "ACTIVE",
+        branchAccess: [{ branchId: "branch-1" }],
+      });
+    }
+    return Promise.resolve(null);
+  });
+});
 
 describe("sale authorization enforcement", () => {
   it("creates a cancellation request instead of changing the sale", async () => {
