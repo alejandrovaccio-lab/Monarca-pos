@@ -46,7 +46,7 @@ describe("register sessions", () => {
     await expect(openRegisterSession({ branchId: "branch-1", registerId: "register-1", openedById: "user-1", openingFloat: 500 })).rejects.toThrow("REGISTER_ALREADY_OPEN");
   });
 
-  it("closes a session and calculates cash variance", async () => {
+  it("closes a session and calculates cash sales and variance", async () => {
     const branch = { id: "branch-1", organizationId: "org-1" };
     db.registerSession.findUnique.mockResolvedValue({
       id: "session-1",
@@ -57,16 +57,27 @@ describe("register sessions", () => {
       register: { id: "register-1", branchId: "branch-1", branch },
     });
     db.user.findUnique.mockResolvedValue({ id: "manager-1", organizationId: "org-1", status: "ACTIVE", branchAccess: [{ branchId: "branch-1" }] });
-    db.payment.findMany.mockResolvedValue([{ amount: 1000 }, { amount: 250 }]);
+    db.payment.findMany.mockResolvedValue([
+      { amount: 1000, sale: { status: "COMPLETED" } },
+      { amount: 250, sale: { status: "COMPLETED" } },
+      { amount: 100, sale: { status: "REFUNDED" } },
+    ]);
     db.registerSession.updateMany.mockResolvedValue({ count: 1 });
     db.register.updateMany.mockResolvedValue({ count: 1 });
     transactionMock();
 
-    const result = await closeRegisterSession({ sessionId: "session-1", closedById: "manager-1", closingTotal: 1700 });
+    const result = await closeRegisterSession({ sessionId: "session-1", closedById: "manager-1", closingTotal: 1650 });
 
-    expect(result.expectedCash).toBe(1750);
     expect(result.cashSales).toBe(1250);
-    expect(result.variance).toBe(-50);
+    expect(result.cashReversals).toBe(100);
+    expect(result.expectedCash).toBe(1650);
+    expect(result.variance).toBe(0);
+    expect(db.payment.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        sale: expect.objectContaining({ status: { in: ["COMPLETED", "CANCELLED", "REFUNDED"] } }),
+        method: "CASH",
+      }),
+    }));
     expect(db.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ action: "REGISTER_CLOSE" }) }));
   });
 });
