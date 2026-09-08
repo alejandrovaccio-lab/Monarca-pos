@@ -60,6 +60,12 @@ describe("session middleware", () => {
     expect(await requireSession("token")).toBeNull();
   });
 
+  it("rejects a session whose user is inactive", async () => {
+    getContext.mockResolvedValue(context({ user: { id: "user-1", name: "Colaborador", status: "INACTIVE" } }));
+    expect(await requireSession("token")).toBeNull();
+    expect(db.userSession.update).not.toHaveBeenCalled();
+  });
+
   it("refreshes lastSeenAt for a valid session", async () => {
     const result = await requireSession("token");
     expect(result).toBeTruthy();
