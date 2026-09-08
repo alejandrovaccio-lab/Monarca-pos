@@ -48,7 +48,14 @@ const pendingRequest = {
 
 describe("complete authorization flow", () => {
   it("creates a scoped request and allows a manager to approve it with an audit entry", async () => {
-    db.user.findUnique.mockResolvedValueOnce(requester).mockResolvedValueOnce(approver("GERENTE"));
+    // Resolve the fixture by requested user id instead of relying on mock call order.
+    // This keeps the test stable when requestAuthorization and resolveAuthorization
+    // evolve and both query prisma.user.findUnique independently.
+    db.user.findUnique.mockImplementation(async ({ where }: any) => {
+      if (where.id === "cashier-1") return requester;
+      if (where.id === "manager-1") return approver("GERENTE");
+      return null;
+    });
     db.authorizationRequest.create.mockResolvedValue(pendingRequest);
     db.authorizationRequest.findUnique.mockResolvedValue(pendingRequest);
 
