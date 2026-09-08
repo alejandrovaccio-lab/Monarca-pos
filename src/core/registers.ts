@@ -67,12 +67,20 @@ export async function closeRegisterSession(input: { sessionId: string; closedByI
   if (!closer || closer.status !== "ACTIVE" || closer.organizationId !== session.register.branch.organizationId) throw new Error("USER_NOT_AUTHORIZED");
   if (!closer.branchAccess.length) throw new Error("BRANCH_ACCESS_REQUIRED");
 
+  // Only completed cash sales add cash. Authorized cancellations/refunds reverse
+  // the cash actually received, while card/transfer/other payments never enter
+  // the physical-cash reconciliation.
   const payments = await prisma.payment.findMany({
-    where: { sale: { registerSessionId: session.id, status: "COMPLETED" }, method: "CASH" },
-    select: { amount: true },
+    where: { sale: { registerSessionId: session.id, status: { in: ["COMPLETED", "CANCELLED", "REFUNDED"] } }, method: "CASH" },
+    select: { amount: true, sale: { select: { status: true } } },
   });
-  const cashSales = payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
-  const expectedCash = Number(session.openingFloat) + cashSales;
+  const cashSales = payments
+    .filter((payment) => payment.sale.status === "COMPLETED")
+    .reduce((sum, payment) => sum + Number(payment.amount), 0);
+  const cashReversals = payments
+    .filter((payment) => payment.sale.status === "CANCELLED" || payment.sale.status === "REFUNDED")
+    .reduce((sum, payment) => sum + Number(payment.amount), 0);
+  const expectedCash = Number((Number(session.openingFloat) + cashSales - cashReversals).toFixed(2));
   const variance = Number((input.closingTotal - expectedCash).toFixed(2));
 
   return prisma.$transaction(async (tx) => {
@@ -96,11 +104,11 @@ export async function closeRegisterSession(input: { sessionId: string; closedByI
         action: "REGISTER_CLOSE",
         entityType: "RegisterSession",
         entityId: session.id,
-        beforeData: { openingFloat: Number(session.openingFloat), expectedCash },
+        beforeData: { openingFloat: Number(session.openingFloat), expectedCash, cashSales, cashReversals },
         afterData: { closingTotal: input.closingTotal, variance },
       },
     });
 
-    return { ...session, closedAt: new Date(), closedById: input.closedById, closingTotal: input.closingTotal, expectedCash, cashSales, variance };
+    return { ...session, closedAt: new Date(), closedById: input.closedById, closingTotal: input.closingTotal, expectedCash, cashSales, cashReversals, variance };
   });
 }
