@@ -74,9 +74,12 @@ describe("authorized cash movements", () => {
     });
     db.registerSession.findUnique.mockResolvedValue(session());
     db.user.findUnique.mockResolvedValue({ id: "manager-1", organizationId: "org-1", status: "ACTIVE", branchAccess: [{ branchId: "branch-1" }] });
-    db.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{
-      id: "movement-1", registerSessionId: "session-1", branchId: "branch-1", requestedById: "user-1", authorizationRequestId: "auth-1", type: "CASH_IN", amount: 300, reason: "Cambio autorizado", createdAt: new Date(),
-    }]);
+    db.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        id: "movement-1", registerSessionId: "session-1", branchId: "branch-1", requestedById: "user-1", authorizationRequestId: "auth-1", type: "CASH_IN", amount: 300, reason: "Cambio autorizado", createdAt: new Date(),
+      }]);
     db.authorizationRequest.update.mockResolvedValue({});
     transactionMock();
 
