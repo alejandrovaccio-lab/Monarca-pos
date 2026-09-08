@@ -73,8 +73,10 @@ describe("order to sale", () => {
       data: { saleId: "sale-1", status: "PAID" },
     });
     expect(mocks.auditCreate).toHaveBeenCalledWith(expect.objectContaining({
-      action: "ORDER_PAID",
-      entityId: "order-1",
+      data: expect.objectContaining({
+        action: "ORDER_PAID",
+        entityId: "order-1",
+      }),
     }));
     expect(result.order).toEqual({ id: "order-1", saleId: "sale-1", status: "PAID" });
     expect(result.usedQuantities[0].quantity).toBe("1.7200");
