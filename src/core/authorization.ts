@@ -31,12 +31,28 @@ export async function requestAuthorization(input: {
 export async function resolveAuthorization(input: {
   requestId: string; approverId: string; decision: "APPROVED" | "REJECTED"; notes?: string;
 }) {
-  if (!(await canApproveAuthorization(input.approverId))) throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
+  const approver = await prisma.user.findUnique({
+    where: { id: input.approverId },
+    include: {
+      roles: { include: { role: true } },
+      branchAccess: true
+    }
+  });
+  if (!approver || approver.status === "INACTIVE" || !approver.roles.some(({ role }) => APPROVER_ROLES.has(role.name))) {
+    throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
+  }
 
   const request = await prisma.authorizationRequest.findUnique({ where: { id: input.requestId } });
   if (!request) throw new Error("AUTHORIZATION_NOT_FOUND");
   if (request.requestedById === input.approverId) throw new Error("SELF_APPROVAL_NOT_ALLOWED");
   if (request.status !== "PENDING") throw new Error("AUTHORIZATION_ALREADY_RESOLVED");
+
+  if (approver.organizationId !== request.organizationId) {
+    throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+  }
+  if (request.branchId && !approver.branchAccess.some(({ branchId }) => branchId === request.branchId)) {
+    throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+  }
 
   const status = input.decision;
   return prisma.$transaction(async (tx) => {
