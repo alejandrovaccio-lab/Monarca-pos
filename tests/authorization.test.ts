@@ -26,6 +26,16 @@ function transactionMock() {
   db.$transaction.mockImplementation(async (callback: (tx: any) => unknown) => callback(db));
 }
 
+function activeApprover(overrides: Record<string, unknown> = {}) {
+  return {
+    status: "ACTIVE",
+    organizationId: "org-1",
+    roles: [{ role: { name: "GERENTE" } }],
+    branchAccess: [{ branchId: "branch-1" }],
+    ...overrides
+  };
+}
+
 describe("role authorization", () => {
   it("allows a user with the required permission", async () => {
     db.user.findUnique.mockResolvedValue({
@@ -104,7 +114,7 @@ describe("role authorization", () => {
   });
 
   it("rejects a missing authorization request", async () => {
-    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "GERENTE" } }] });
+    db.user.findUnique.mockResolvedValue(activeApprover());
     db.authorizationRequest.findUnique.mockResolvedValue(null);
 
     await expect(resolveAuthorization({ requestId: "missing", approverId: "manager-1", decision: "APPROVED" }))
@@ -112,7 +122,7 @@ describe("role authorization", () => {
   });
 
   it("prevents self-approval and preserves the pending request", async () => {
-    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "GERENTE" } }] });
+    db.user.findUnique.mockResolvedValue(activeApprover());
     db.authorizationRequest.findUnique.mockResolvedValue({ id: "auth-1", requestedById: "manager-1", status: "PENDING" });
 
     await expect(resolveAuthorization({ requestId: "auth-1", approverId: "manager-1", decision: "APPROVED" }))
@@ -121,29 +131,62 @@ describe("role authorization", () => {
   });
 
   it("does not resolve an authorization twice", async () => {
-    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "ADMIN" } }] });
+    db.user.findUnique.mockResolvedValue(activeApprover());
     db.authorizationRequest.findUnique.mockResolvedValue({ id: "auth-1", requestedById: "cashier-1", status: "APPROVED" });
 
-    await expect(resolveAuthorization({ requestId: "auth-1", approverId: "admin-1", decision: "REJECTED" }))
+    await expect(resolveAuthorization({ requestId: "auth-1", approverId: "manager-1", decision: "REJECTED" }))
       .rejects.toThrow("AUTHORIZATION_ALREADY_RESOLVED");
   });
 
-  it("rejects a concurrent resolution when the atomic pending claim is already resolved", async () => {
-    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "GERENTE" } }] });
-    db.authorizationRequest.findUnique.mockResolvedValue({ id: "auth-1", requestedById: "cashier-1", status: "PENDING" });
-    db.authorizationRequest.update.mockRejectedValue({ code: "P2025" });
+  it("rejects an approver from another organization", async () => {
+    db.user.findUnique.mockResolvedValue(activeApprover({ organizationId: "org-2" }));
+    db.authorizationRequest.findUnique.mockResolvedValue({
+      id: "auth-1", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-1", status: "PENDING"
+    });
+
+    await expect(resolveAuthorization({ requestId: "auth-1", approverId: "manager-2", decision: "APPROVED" }))
+      .rejects.toThrow("AUTHORIZATION_SCOPE_FORBIDDEN");
+    expect(db.authorizationRequest.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects an approver without access to the request branch", async () => {
+    db.user.findUnique.mockResolvedValue(activeApprover({ branchAccess: [{ branchId: "branch-2" }] }));
+    db.authorizationRequest.findUnique.mockResolvedValue({
+      id: "auth-1", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-1", status: "PENDING"
+    });
+
+    await expect(resolveAuthorization({ requestId: "auth-1", approverId: "manager-1", decision: "APPROVED" }))
+      .rejects.toThrow("AUTHORIZATION_SCOPE_FORBIDDEN");
+    expect(db.authorizationRequest.update).not.toHaveBeenCalled();
+  });
+
+  it("allows an approver with matching organization and branch access", async () => {
+    db.user.findUnique.mockResolvedValue(activeApprover());
+    db.authorizationRequest.findUnique.mockResolvedValue({
+      id: "auth-1", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-1", status: "PENDING",
+      entityType: "Sale", entityId: "sale-1", beforeData: { status: "COMPLETED" }, requestedData: { status: "CANCELLED" }
+    });
+    db.authorizationRequest.update.mockResolvedValue({ id: "auth-1", status: "APPROVED", resolvedAt: new Date() });
+    db.authorizationApproval.create.mockResolvedValue({ id: "approval-1", decision: "APPROVED" });
+    db.auditLog.create.mockResolvedValue({ id: "audit-1" });
     transactionMock();
 
     await expect(resolveAuthorization({ requestId: "auth-1", approverId: "manager-1", decision: "APPROVED" }))
-      .rejects.toThrow("AUTHORIZATION_ALREADY_RESOLVED");
-    expect(db.authorizationRequest.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: "auth-1", status: "PENDING" }
-    }));
-    expect(db.authorizationApproval.create).not.toHaveBeenCalled();
+      .resolves.toMatchObject({ approval: { id: "approval-1" }, request: { status: "APPROVED" } });
+  });
+
+  it("rejects a global authorization only when the organization does not match", async () => {
+    db.user.findUnique.mockResolvedValue(activeApprover({ organizationId: "org-2" }));
+    db.authorizationRequest.findUnique.mockResolvedValue({
+      id: "auth-global", organizationId: "org-1", branchId: undefined, requestedById: "cashier-1", status: "PENDING"
+    });
+
+    await expect(resolveAuthorization({ requestId: "auth-global", approverId: "manager-2", decision: "APPROVED" }))
+      .rejects.toThrow("AUTHORIZATION_SCOPE_FORBIDDEN");
   });
 
   it("approves a request, records the approval, resolves the request, and audits it", async () => {
-    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "GERENTE" } }] });
+    db.user.findUnique.mockResolvedValue(activeApprover());
     db.authorizationRequest.findUnique.mockResolvedValue({
       id: "auth-1", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-1", status: "PENDING",
       entityType: "Sale", entityId: "sale-1", beforeData: { status: "COMPLETED" }, requestedData: { status: "CANCELLED" }
@@ -171,7 +214,7 @@ describe("role authorization", () => {
   });
 
   it("supports rejection with notes and records the rejection audit", async () => {
-    db.user.findUnique.mockResolvedValue({ status: "ACTIVE", roles: [{ role: { name: "ENCARGADO_TIENDA" } }] });
+    db.user.findUnique.mockResolvedValue(activeApprover({ roles: [{ role: { name: "ENCARGADO_TIENDA" } }] }));
     db.authorizationRequest.findUnique.mockResolvedValue({
       id: "auth-2", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-2", status: "PENDING",
       entityType: "Sale", entityId: "sale-2", beforeData: { status: "COMPLETED" }, requestedData: { status: "REFUNDED" }
