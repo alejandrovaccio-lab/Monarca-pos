@@ -21,7 +21,12 @@ const db = prisma as any;
 
 beforeEach(() => vi.clearAllMocks());
 
-const approver = (name: string) => ({ roles: [{ role: { name } }] });
+const approver = (name: string) => ({
+  organizationId: "org-1",
+  status: "ACTIVE",
+  roles: [{ role: { name } }],
+  branchAccess: [{ branchId: "branch-1" }]
+});
 const pendingRequest = { id: "request-1", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-1", status: "PENDING", entityType: "Sale", entityId: "sale-1", beforeData: { status: "COMPLETED" }, requestedData: { status: "CANCELLED" } };
 
 describe("complete authorization flow", () => {
