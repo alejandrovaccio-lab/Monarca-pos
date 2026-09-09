@@ -104,7 +104,6 @@ describe("authorization middleware boundary", () => {
   });
 
   it("rejects an invalid session before checking approver authority", async () => {
-    requireBranchAuthorizationApprover("bad-token", "branch-1");
     requireBranchSession.mockResolvedValue(null);
 
     await expect(
