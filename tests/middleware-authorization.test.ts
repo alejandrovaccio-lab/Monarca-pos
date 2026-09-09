@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { requireBranchSession } = vi.hoisted(() => ({
+const { requireBranchSession, requireSession } = vi.hoisted(() => ({
   requireBranchSession: vi.fn(),
+  requireSession: vi.fn(),
 }));
 
 const { hasPermission, canApproveAuthorization } = vi.hoisted(() => ({
@@ -9,10 +10,20 @@ const { hasPermission, canApproveAuthorization } = vi.hoisted(() => ({
   canApproveAuthorization: vi.fn(),
 }));
 
-vi.mock("../src/middleware/auth", () => ({ requireBranchSession }));
+const { findAuthorizationRequest } = vi.hoisted(() => ({
+  findAuthorizationRequest: vi.fn(),
+}));
+
+vi.mock("../src/middleware/auth", () => ({ requireBranchSession, requireSession }));
 vi.mock("../src/core/authorization", () => ({ hasPermission, canApproveAuthorization }));
+vi.mock("../src/lib/prisma", () => ({
+  prisma: {
+    authorizationRequest: { findUnique: findAuthorizationRequest },
+  },
+}));
 
 import {
+  requireAuthorizationDecisionApprover,
   requireBranchAuthorizationApprover,
   requireBranchPermission,
 } from "../src/middleware/authorization";
@@ -21,9 +32,8 @@ describe("authorization middleware boundary", () => {
   const context = {
     sessionId: "session-1",
     userId: "user-1",
-    organizationId: "org-1",
     branchId: "branch-1",
-    user: { id: "user-1", status: "ACTIVE" },
+    user: { id: "user-1", status: "ACTIVE", organizationId: "org-1" },
   };
 
   beforeEach(() => {
@@ -94,10 +104,70 @@ describe("authorization middleware boundary", () => {
   });
 
   it("rejects an invalid session before checking approver authority", async () => {
+    requireBranchAuthorizationApprover("bad-token", "branch-1");
     requireBranchSession.mockResolvedValue(null);
 
     await expect(
       requireBranchAuthorizationApprover("bad-token", "branch-1")
+    ).resolves.toBeNull();
+
+    expect(canApproveAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("derives a branch-scoped decision from the authorization request instead of client input", async () => {
+    requireSession.mockResolvedValue(context);
+    findAuthorizationRequest.mockResolvedValue({ organizationId: "org-1", branchId: "branch-1" });
+    canApproveAuthorization.mockResolvedValue(true);
+
+    await expect(
+      requireAuthorizationDecisionApprover("token", "request-1")
+    ).resolves.toEqual(context);
+
+    expect(findAuthorizationRequest).toHaveBeenCalledWith({
+      where: { id: "request-1" },
+      select: { organizationId: true, branchId: true },
+    });
+    expect(canApproveAuthorization).toHaveBeenCalledWith("user-1");
+  });
+
+  it("rejects a decision when the session branch differs from the authorization request", async () => {
+    requireSession.mockResolvedValue(context);
+    findAuthorizationRequest.mockResolvedValue({ organizationId: "org-1", branchId: "branch-2" });
+
+    await expect(
+      requireAuthorizationDecisionApprover("token", "request-2")
+    ).resolves.toBeNull();
+
+    expect(canApproveAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("rejects a decision when the session organization differs from the authorization request", async () => {
+    requireSession.mockResolvedValue(context);
+    findAuthorizationRequest.mockResolvedValue({ organizationId: "org-2", branchId: "branch-1" });
+
+    await expect(
+      requireAuthorizationDecisionApprover("token", "request-3")
+    ).resolves.toBeNull();
+
+    expect(canApproveAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("allows a global authorization from any branch in the same organization", async () => {
+    requireSession.mockResolvedValue(context);
+    findAuthorizationRequest.mockResolvedValue({ organizationId: "org-1", branchId: null });
+    canApproveAuthorization.mockResolvedValue(true);
+
+    await expect(
+      requireAuthorizationDecisionApprover("token", "request-global")
+    ).resolves.toEqual(context);
+  });
+
+  it("rejects a missing authorization request before checking approver authority", async () => {
+    requireSession.mockResolvedValue(context);
+    findAuthorizationRequest.mockResolvedValue(null);
+
+    await expect(
+      requireAuthorizationDecisionApprover("token", "missing")
     ).resolves.toBeNull();
 
     expect(canApproveAuthorization).not.toHaveBeenCalled();
