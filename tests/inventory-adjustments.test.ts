@@ -132,7 +132,7 @@ describe("inventory adjustment authorization", () => {
       inventoryMovement: { findFirst, create: movement },
       auditLog: { create: audit },
     }));
-    return { upsert, movement, findFirst, audit };
+    return { upsert, movement, findFirst, audit, employeeFindUnique, balanceFindUnique };
   }
 
   it("executes an approved count correction and writes movement and audit", async () => {
@@ -187,6 +187,47 @@ describe("inventory adjustment authorization", () => {
     expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: { referenceType: "MANUAL_COUNT_CORRECTION", referenceId: "request-1" },
     }));
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("rejects an authorization bound to a different product", async () => {
+    configureExecutionMocks();
+    db.authorizationRequest.findUnique.mockResolvedValue({
+      ...approvedRequest(),
+      entityId: "product-2",
+    });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_TARGET_INVALID");
+  });
+
+  it("rejects an authorization whose requested branch does not match the authorization branch", async () => {
+    configureExecutionMocks();
+    db.authorizationRequest.findUnique.mockResolvedValue({
+      ...approvedRequest(),
+      requestedData: { ...approvedRequest().requestedData, branchId: "branch-2" },
+    });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_TARGET_INVALID");
+  });
+
+  it("rejects an authorization when the employee belongs to another organization", async () => {
+    const { employeeFindUnique } = configureExecutionMocks();
+    employeeFindUnique.mockResolvedValue({ organizationId: "org-2" });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("EMPLOYEE_BRANCH_INVALID");
+  });
+
+  it("rejects execution when inventory changed after authorization", async () => {
+    const { balanceFindUnique, upsert, movement, audit } = configureExecutionMocks();
+    balanceFindUnique.mockResolvedValue({ quantity: 11 });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("INVENTORY_CHANGED_SINCE_REQUEST");
     expect(upsert).not.toHaveBeenCalled();
     expect(movement).not.toHaveBeenCalled();
     expect(audit).not.toHaveBeenCalled();
