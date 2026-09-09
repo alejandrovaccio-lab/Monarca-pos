@@ -32,7 +32,7 @@ const request = {
   requestedData: { price: 12 },
 };
 
-function transactionMock(options: { update?: unknown; approval?: unknown; audit?: unknown; updateError?: unknown } = {}) {
+function transactionMock(options: { update?: unknown; approval?: unknown; audit?: unknown; updateError?: unknown; approvalError?: unknown; auditError?: unknown } = {}) {
   const tx = {
     user: { findUnique: vi.fn().mockResolvedValue(approver) },
     authorizationRequest: {
@@ -42,10 +42,16 @@ function transactionMock(options: { update?: unknown; approval?: unknown; audit?
       }),
     },
     authorizationApproval: {
-      create: vi.fn().mockResolvedValue(options.approval ?? { id: "approval-1" }),
+      create: vi.fn(async () => {
+        if (options.approvalError) throw options.approvalError;
+        return options.approval ?? { id: "approval-1" };
+      }),
     },
     auditLog: {
-      create: vi.fn().mockResolvedValue(options.audit ?? { id: "audit-1" }),
+      create: vi.fn(async () => {
+        if (options.auditError) throw options.auditError;
+        return options.audit ?? { id: "audit-1" };
+      }),
     },
   };
   prisma.$transaction.mockImplementation(async (callback: (tx: any) => unknown) => callback(tx));
@@ -124,6 +130,34 @@ describe("Authorization resolution integrity", () => {
 
     expect(tx.authorizationApproval.create).not.toHaveBeenCalled();
     expect(tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("does not create an audit entry when approval persistence fails", async () => {
+    const tx = transactionMock({ approvalError: new Error("APPROVAL_DB_FAILURE") });
+
+    await expect(resolveAuthorization({
+      requestId: "auth-1",
+      approverId: "manager-1",
+      decision: "APPROVED",
+    })).rejects.toThrow("APPROVAL_DB_FAILURE");
+
+    expect(tx.authorizationRequest.update).toHaveBeenCalledTimes(1);
+    expect(tx.authorizationApproval.create).toHaveBeenCalledTimes(1);
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("propagates audit persistence failure so the surrounding transaction can roll back", async () => {
+    const tx = transactionMock({ auditError: new Error("AUDIT_DB_FAILURE") });
+
+    await expect(resolveAuthorization({
+      requestId: "auth-1",
+      approverId: "manager-1",
+      decision: "REJECTED",
+    })).rejects.toThrow("AUDIT_DB_FAILURE");
+
+    expect(tx.authorizationRequest.update).toHaveBeenCalledTimes(1);
+    expect(tx.authorizationApproval.create).toHaveBeenCalledTimes(1);
+    expect(tx.auditLog.create).toHaveBeenCalledTimes(1);
   });
 
   it("persists the authenticated approver and requested decision, not client-supplied identity", async () => {
