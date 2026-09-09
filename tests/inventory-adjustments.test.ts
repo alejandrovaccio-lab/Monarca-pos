@@ -7,7 +7,7 @@ vi.mock("../src/lib/prisma", () => ({
     product: { findUnique: vi.fn() },
     employee: { findUnique: vi.fn() },
     inventoryBalance: { findUnique: vi.fn(), upsert: vi.fn() },
-    inventoryMovement: { create: vi.fn() },
+    inventoryMovement: { create: vi.fn(), findFirst: vi.fn() },
     authorizationRequest: { findUnique: vi.fn(), create: vi.fn() },
     auditLog: { create: vi.fn() },
     $transaction: vi.fn(),
@@ -83,9 +83,8 @@ describe("inventory adjustment authorization", () => {
     })).rejects.toThrow("INVENTORY_NEGATIVE_NOT_ALLOWED");
   });
 
-  it("executes an approved count correction and writes movement and audit", async () => {
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
-    db.authorizationRequest.findUnique.mockResolvedValue({
+  function approvedRequest() {
+    return {
       id: "request-1",
       organizationId: "org-1",
       branchId: "branch-1",
@@ -103,19 +102,41 @@ describe("inventory adjustment authorization", () => {
         resultingQuantity: 8,
         unitCost: 15,
       },
-    });
+    };
+  }
 
+  function configureExecutionMocks(existingMovement: unknown = null) {
+    db.user.findUnique.mockImplementation(({ where }: any) => {
+      if (where?.id === "manager-1") {
+        return Promise.resolve({
+          id: "manager-1",
+          organizationId: "org-1",
+          status: "ACTIVE",
+          roles: [{ role: { name: "GERENTE" } }],
+          branchAccess: [{ branchId: "branch-1" }],
+        });
+      }
+      return Promise.resolve(null);
+    });
+    db.authorizationRequest.findUnique.mockResolvedValue(approvedRequest());
     const employeeFindUnique = vi.fn().mockResolvedValue({ organizationId: "org-1" });
     const balanceFindUnique = vi.fn().mockResolvedValue({ quantity: 10 });
     const upsert = vi.fn().mockResolvedValue({});
     const movement = vi.fn().mockResolvedValue({});
+    const findFirst = vi.fn().mockResolvedValue(existingMovement);
     const audit = vi.fn().mockResolvedValue({});
     db.$transaction.mockImplementation(async (callback: any) => callback({
+      $queryRaw: vi.fn().mockResolvedValue([]),
       employee: { findUnique: employeeFindUnique },
       inventoryBalance: { findUnique: balanceFindUnique, upsert },
-      inventoryMovement: { create: movement },
+      inventoryMovement: { findFirst, create: movement },
       auditLog: { create: audit },
     }));
+    return { upsert, movement, findFirst, audit };
+  }
+
+  it("executes an approved count correction and writes movement and audit", async () => {
+    const { upsert, movement, audit } = configureExecutionMocks();
 
     const result = await executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" });
 
@@ -125,13 +146,60 @@ describe("inventory adjustment authorization", () => {
       update: { quantity: 8 },
     }));
     expect(movement).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ type: "ADJUSTMENT", quantity: -2, employeeId: "employee-1" }),
+      data: expect.objectContaining({ type: "ADJUSTMENT", quantity: -2, employeeId: "employee-1", referenceId: "request-1" }),
     }));
     expect(audit).toHaveBeenCalledOnce();
   });
 
+  it("rejects a pending authorization before changing inventory", async () => {
+    configureExecutionMocks();
+    db.authorizationRequest.findUnique.mockResolvedValue({ ...approvedRequest(), status: "PENDING" });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_NOT_APPROVED");
+  });
+
+  it("rejects execution when the approver has no access to the authorization branch", async () => {
+    configureExecutionMocks();
+    db.user.findUnique.mockImplementation(({ where }: any) => {
+      if (where?.id === "manager-1") {
+        return Promise.resolve({
+          id: "manager-1",
+          organizationId: "org-1",
+          status: "ACTIVE",
+          roles: [{ role: { name: "GERENTE" } }],
+          branchAccess: [],
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_SCOPE_FORBIDDEN");
+  });
+
+  it("rejects a second execution of the same authorization", async () => {
+    const { upsert, movement, audit, findFirst } = configureExecutionMocks({ id: "movement-1" });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_ALREADY_EXECUTED");
+
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { referenceType: "MANUAL_COUNT_CORRECTION", referenceId: "request-1" },
+    }));
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
   it("requires an approver to execute the approved request", async () => {
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "CAJERO" } }] });
+    db.user.findUnique.mockResolvedValue({
+      id: "cashier-1",
+      organizationId: "org-1",
+      status: "ACTIVE",
+      roles: [{ role: { name: "CAJERO" } }],
+      branchAccess: [{ branchId: "branch-1" }],
+    });
     await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "cashier-1" }))
       .rejects.toThrow("AUTHORIZATION_APPROVER_REQUIRED");
     expect(db.authorizationRequest.findUnique).not.toHaveBeenCalled();
