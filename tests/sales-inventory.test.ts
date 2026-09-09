@@ -54,6 +54,7 @@ describe("authorized sale inventory restoration", () => {
     const movement = vi.fn().mockResolvedValue({});
     const audit = vi.fn().mockResolvedValue({});
     db.$transaction.mockImplementation(async (callback: any) => callback({
+      $queryRaw: vi.fn().mockResolvedValue([]),
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
       sale: { findUnique: vi.fn().mockResolvedValue(sale), updateMany },
       inventoryBalance: { upsert },
@@ -96,6 +97,7 @@ describe("authorized sale inventory restoration", () => {
     db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
     db.authorizationRequest.findUnique.mockResolvedValue(authorization);
     db.$transaction.mockImplementationOnce(async (callback: any) => callback({
+      $queryRaw: vi.fn().mockResolvedValue([]),
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
       sale: {
         findUnique: vi.fn().mockResolvedValue(sale),
