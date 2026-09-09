@@ -53,8 +53,9 @@ describe("authorized sale inventory restoration", () => {
     const upsert = vi.fn().mockResolvedValue({});
     const movement = vi.fn().mockResolvedValue({});
     const audit = vi.fn().mockResolvedValue({});
+    const queryRaw = vi.fn().mockResolvedValue([]);
     db.$transaction.mockImplementation(async (callback: any) => callback({
-      $queryRaw: vi.fn().mockResolvedValue([]),
+      $queryRaw: queryRaw,
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
       sale: { findUnique: vi.fn().mockResolvedValue(sale), updateMany },
       inventoryBalance: { upsert },
@@ -65,6 +66,7 @@ describe("authorized sale inventory restoration", () => {
     const result = await executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" });
 
     expect(result.status).toBe("CANCELLED");
+    expect(queryRaw).toHaveBeenCalledOnce();
     expect(updateMany).toHaveBeenCalledWith({
       where: { id: "sale-1", status: "COMPLETED" },
       data: { status: "CANCELLED" },
@@ -91,6 +93,22 @@ describe("authorized sale inventory restoration", () => {
     await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" }))
       .rejects.toThrow("AUTHORIZATION_NOT_APPROVED");
     expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects an authorization that changes before execution", async () => {
+    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization);
+    db.$transaction.mockImplementationOnce(async (callback: any) => callback({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue({ ...authorization, status: "CANCELLED" }) },
+      sale: { findUnique: vi.fn(), updateMany: vi.fn() },
+      inventoryBalance: { upsert: vi.fn() },
+      inventoryMovement: { create: vi.fn() },
+      auditLog: { create: vi.fn() },
+    }));
+
+    await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_NOT_APPROVED");
   });
 
   it("blocks execution when the sale has already changed", async () => {
