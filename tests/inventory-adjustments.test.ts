@@ -16,6 +16,9 @@ vi.mock("../src/lib/prisma", () => ({
 
 import { prisma } from "../src/lib/prisma";
 import {
+  authorizationIntegrityHash,
+} from "../src/core/authorization";
+import {
   executeApprovedInventoryAdjustment,
   requestInventoryAdjustment,
 } from "../src/core/inventory-adjustments";
@@ -311,6 +314,49 @@ describe("inventory adjustment authorization", () => {
 
     await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
       .rejects.toThrow("AUTHORIZATION_TARGET_INVALID");
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a tampered stored authorization integrity hash", async () => {
+    const { upsert, movement, audit, currentAuthorizationFindUnique } = configureExecutionMocks();
+    const request = approvedRequest();
+    currentAuthorizationFindUnique.mockResolvedValue({
+      ...request,
+      integrityHash: "0000000000000000000000000000000000000000000000000000000000000000",
+    });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("rejects an integrity hash that does not match the changed authorization payload", async () => {
+    const { upsert, movement, audit, currentAuthorizationFindUnique } = configureExecutionMocks();
+    const request = approvedRequest();
+    const originalHash = authorizationIntegrityHash({
+      type: "INVENTORY_ADJUSTMENT",
+      organizationId: request.organizationId,
+      branchId: request.branchId,
+      requestedById: "cashier-1",
+      entityType: request.entityType,
+      entityId: request.entityId,
+      reason: request.reason,
+      requestedData: request.requestedData,
+    });
+    currentAuthorizationFindUnique.mockResolvedValue({
+      ...request,
+      requestedData: { ...request.requestedData, quantity: 99 },
+      integrityHash: originalHash,
+    });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
 
     expect(upsert).not.toHaveBeenCalled();
     expect(movement).not.toHaveBeenCalled();
