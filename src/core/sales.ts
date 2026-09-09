@@ -54,6 +54,21 @@ export async function executeApprovedSaleChange(input: {
     throw new Error("AUTHORIZATION_ENTITY_INVALID");
   }
 
+  const expectedIntegrityHash = authorizationIntegrityHash({
+    organizationId: authorization.organizationId,
+    branchId: authorization.branchId ?? undefined,
+    requestedById: authorization.requestedById,
+    type: authorization.type,
+    reason: authorization.reason,
+    entityType: authorization.entityType,
+    entityId: authorization.entityId ?? undefined,
+    beforeData: authorization.beforeData,
+    requestedData: authorization.requestedData,
+  });
+  if (authorization.integrityHash && authorization.integrityHash !== expectedIntegrityHash) {
+    throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+  }
+
   const expectedStatus = TARGET_STATUS[authorization.type as SaleChangeType];
   const requested = authorization.requestedData as { id?: string; status?: string } | null;
   if (requested?.id !== authorization.entityId || requested.status !== expectedStatus) {
