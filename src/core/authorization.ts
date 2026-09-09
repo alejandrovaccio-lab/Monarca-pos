@@ -61,6 +61,10 @@ export async function requestAuthorization(input: {
 export async function resolveAuthorization(input: {
   requestId: string; approverId: string; decision: "APPROVED" | "REJECTED"; notes?: string;
 }) {
+  if (input.decision !== "APPROVED" && input.decision !== "REJECTED") {
+    throw new Error("AUTHORIZATION_DECISION_INVALID");
+  }
+
   const approver = await prisma.user.findUnique({
     where: { id: input.approverId },
     include: {
