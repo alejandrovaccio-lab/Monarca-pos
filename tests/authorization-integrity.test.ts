@@ -48,7 +48,7 @@ function transactionMock(options: { update?: unknown; approval?: unknown; audit?
       create: vi.fn().mockResolvedValue(options.audit ?? { id: "audit-1" }),
     },
   };
-  prisma.$transaction.mockImplementation(async (callback: (tx: typeof tx) => unknown) => callback(tx));
+  prisma.$transaction.mockImplementation(async (callback: (tx: any) => unknown) => callback(tx));
   return tx;
 }
 
@@ -74,6 +74,28 @@ describe("Authorization resolution integrity", () => {
       where: { id: "auth-1", status: "PENDING" },
       data: expect.objectContaining({ status: "APPROVED" }),
     }));
+    expect(tx.authorizationApproval.create).toHaveBeenCalledTimes(1);
+    expect(tx.auditLog.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a second resolution after the request is already resolved", async () => {
+    const tx = transactionMock();
+    prisma.authorizationRequest.findUnique
+      .mockResolvedValueOnce(request)
+      .mockResolvedValueOnce({ ...request, status: "APPROVED" });
+
+    await resolveAuthorization({
+      requestId: "auth-1",
+      approverId: "manager-1",
+      decision: "APPROVED",
+    });
+
+    await expect(resolveAuthorization({
+      requestId: "auth-1",
+      approverId: "manager-1",
+      decision: "REJECTED",
+    })).rejects.toThrow("AUTHORIZATION_ALREADY_RESOLVED");
+
     expect(tx.authorizationApproval.create).toHaveBeenCalledTimes(1);
     expect(tx.auditLog.create).toHaveBeenCalledTimes(1);
   });
