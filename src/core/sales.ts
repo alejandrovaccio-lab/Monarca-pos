@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma";
-import { canApproveAuthorization, requestAuthorization } from "./authorization";
+import { canApproveAuthorization, requestAuthorization, authorizationIntegrityHash } from "./authorization";
 
 export type SaleChangeType = "SALE_CANCEL" | "SALE_REFUND";
 
@@ -47,17 +47,56 @@ export async function executeApprovedSaleChange(input: {
   });
   if (!authorization) throw new Error("AUTHORIZATION_NOT_FOUND");
   if (authorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
+  if (authorization.type !== "SALE_CANCEL" && authorization.type !== "SALE_REFUND") {
+    throw new Error("AUTHORIZATION_TYPE_INVALID");
+  }
   if (authorization.entityType !== "Sale" || !authorization.entityId) {
     throw new Error("AUTHORIZATION_ENTITY_INVALID");
   }
 
-  const requested = authorization.requestedData as { status?: string } | null;
-  const targetStatus = requested?.status;
-  if (targetStatus !== "CANCELLED" && targetStatus !== "REFUNDED") {
+  const expectedStatus = TARGET_STATUS[authorization.type as SaleChangeType];
+  const requested = authorization.requestedData as { id?: string; status?: string } | null;
+  if (requested?.id !== authorization.entityId || requested.status !== expectedStatus) {
     throw new Error("AUTHORIZATION_TARGET_INVALID");
   }
 
   return prisma.$transaction(async (tx) => {
+    const currentAuthorization = await tx.authorizationRequest.findUnique({
+      where: { id: authorization.id },
+    });
+    if (!currentAuthorization) throw new Error("AUTHORIZATION_NOT_FOUND");
+    if (currentAuthorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
+
+    const currentHash = authorizationIntegrityHash({
+      organizationId: currentAuthorization.organizationId,
+      branchId: currentAuthorization.branchId ?? undefined,
+      requestedById: currentAuthorization.requestedById,
+      type: currentAuthorization.type,
+      reason: currentAuthorization.reason,
+      entityType: currentAuthorization.entityType,
+      entityId: currentAuthorization.entityId ?? undefined,
+      beforeData: currentAuthorization.beforeData,
+      requestedData: currentAuthorization.requestedData,
+    });
+    if (currentAuthorization.integrityHash && currentAuthorization.integrityHash !== currentHash) {
+      throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    }
+    if (authorization.integrityHash && currentAuthorization.integrityHash !== authorization.integrityHash) {
+      throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    }
+
+    if (currentAuthorization.entityType !== "Sale" || currentAuthorization.entityId !== authorization.entityId) {
+      throw new Error("AUTHORIZATION_ENTITY_INVALID");
+    }
+    if (currentAuthorization.type !== authorization.type || currentAuthorization.reason !== authorization.reason) {
+      throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    }
+
+    const currentRequested = currentAuthorization.requestedData as { id?: string; status?: string } | null;
+    if (currentRequested?.id !== currentAuthorization.entityId || currentRequested.status !== expectedStatus) {
+      throw new Error("AUTHORIZATION_TARGET_INVALID");
+    }
+
     const sale = await tx.sale.findUnique({
       where: { id: authorization.entityId! },
       include: { items: true },
@@ -66,7 +105,7 @@ export async function executeApprovedSaleChange(input: {
     if (sale.branchId !== authorization.branchId) throw new Error("AUTHORIZATION_BRANCH_INVALID");
     if (sale.status !== "COMPLETED") throw new Error("SALE_ALREADY_CHANGED");
 
-    const status = targetStatus as "CANCELLED" | "REFUNDED";
+    const status = targetStatusFor(authorization.type);
 
     // Conditional update makes execution single-use even under concurrent requests.
     const changed = await tx.sale.updateMany({
@@ -122,6 +161,13 @@ export async function executeApprovedSaleChange(input: {
 
     return { ...sale, status };
   });
+}
+
+function targetStatusFor(type: string) {
+  if (type !== "SALE_CANCEL" && type !== "SALE_REFUND") {
+    throw new Error("AUTHORIZATION_TYPE_INVALID");
+  }
+  return TARGET_STATUS[type];
 }
 
 async function getSaleOrganizationId(branchId: string) {
