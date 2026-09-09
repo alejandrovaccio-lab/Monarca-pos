@@ -86,6 +86,23 @@ export async function resolveAuthorization(input: {
 
   const status = input.decision;
   return prisma.$transaction(async (tx) => {
+    const currentApprover = await tx.user.findUnique({
+      where: { id: input.approverId },
+      include: {
+        roles: { include: { role: true } },
+        branchAccess: true
+      }
+    });
+    if (!currentApprover || currentApprover.status === "INACTIVE" || !currentApprover.roles.some(({ role }) => APPROVER_ROLES.has(role.name))) {
+      throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
+    }
+    if (currentApprover.organizationId !== request.organizationId) {
+      throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+    }
+    if (request.branchId && !currentApprover.branchAccess.some(({ branchId }) => branchId === request.branchId)) {
+      throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+    }
+
     let claimed;
     try {
       claimed = await tx.authorizationRequest.update({
