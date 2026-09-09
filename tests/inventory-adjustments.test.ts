@@ -287,6 +287,36 @@ describe("inventory adjustment authorization", () => {
     expect(audit).not.toHaveBeenCalled();
   });
 
+  it("rejects an authorization payload with an extra operation field", async () => {
+    const { upsert, movement, audit, currentAuthorizationFindUnique } = configureExecutionMocks();
+    currentAuthorizationFindUnique.mockResolvedValue({
+      ...approvedRequest(),
+      requestedData: { ...approvedRequest().requestedData, targetProductId: "product-2" },
+    });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_TARGET_INVALID");
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("rejects an authorization payload with an invalid adjustment type", async () => {
+    const { upsert, movement, audit, currentAuthorizationFindUnique } = configureExecutionMocks();
+    currentAuthorizationFindUnique.mockResolvedValue({
+      ...approvedRequest(),
+      requestedData: { ...approvedRequest().requestedData, adjustmentType: "PRICE_CHANGE" },
+    });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_TARGET_INVALID");
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
   it("revalidates executor status and branch access inside the execution transaction", async () => {
     const { upsert, movement, audit, executorFindUnique } = configureExecutionMocks();
     executorFindUnique.mockResolvedValue({
