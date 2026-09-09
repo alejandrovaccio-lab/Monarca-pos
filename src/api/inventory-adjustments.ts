@@ -1,11 +1,24 @@
 import { executeApprovedInventoryAdjustment, requestInventoryAdjustment } from "../core/inventory-adjustments";
 
+type InventoryAdjustmentExecutionInput = Parameters<typeof executeApprovedInventoryAdjustment>[0];
+
+export function toInventoryAdjustmentExecutionInput(
+  body: unknown,
+  authenticatedUserId: string
+): InventoryAdjustmentExecutionInput {
+  const input = body && typeof body === "object" ? body as Record<string, unknown> : {};
+  return {
+    requestId: typeof input.requestId === "string" ? input.requestId : "",
+    executorId: authenticatedUserId,
+  };
+}
+
 export async function postInventoryAdjustmentRequest(input: Parameters<typeof requestInventoryAdjustment>[0]) {
   try { return { status: 201, body: await requestInventoryAdjustment(input) }; }
   catch (error) { return mapInventoryAdjustmentError(error); }
 }
 
-export async function postInventoryAdjustmentExecution(input: Parameters<typeof executeApprovedInventoryAdjustment>[0]) {
+export async function postInventoryAdjustmentExecution(input: InventoryAdjustmentExecutionInput) {
   try { return { status: 200, body: await executeApprovedInventoryAdjustment(input) }; }
   catch (error) { return mapInventoryAdjustmentError(error); }
 }
