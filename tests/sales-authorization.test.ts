@@ -8,6 +8,7 @@ vi.mock("../src/lib/prisma", () => ({
     authorizationRequest: { create: vi.fn(), findUnique: vi.fn() },
     auditLog: { create: vi.fn() },
     $transaction: vi.fn(async (callback: any) => callback({
+      authorizationRequest: { findUnique: vi.fn() },
       sale: {
         findUnique: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "COMPLETED", items: [] }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -20,9 +21,25 @@ vi.mock("../src/lib/prisma", () => ({
 }));
 
 import { prisma } from "../src/lib/prisma";
+import { authorizationIntegrityHash } from "../src/core/authorization";
 import { executeApprovedSaleChange, requestSaleChange } from "../src/core/sales";
 
 const db = prisma as any;
+
+const approvedCancellation = () => ({
+  id: "request-1",
+  status: "APPROVED",
+  type: "SALE_CANCEL",
+  entityType: "Sale",
+  entityId: "sale-1",
+  organizationId: "org-1",
+  branchId: "branch-1",
+  requestedById: "cashier-1",
+  reason: "Cliente solicita cancelación",
+  beforeData: { id: "sale-1", status: "COMPLETED" },
+  requestedData: { id: "sale-1", status: "CANCELLED" },
+  integrityHash: undefined,
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -58,7 +75,7 @@ describe("sale authorization enforcement", () => {
 
   it("blocks execution until a manager has approved", async () => {
     db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
-    db.authorizationRequest.findUnique.mockResolvedValue({ id: "request-1", status: "PENDING", entityType: "Sale", entityId: "sale-1", organizationId: "org-1", branchId: "branch-1", requestedData: { status: "CANCELLED" } });
+    db.authorizationRequest.findUnique.mockResolvedValue({ ...approvedCancellation(), status: "PENDING" });
 
     await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_NOT_APPROVED");
     expect(db.$transaction).not.toHaveBeenCalled();
@@ -66,7 +83,18 @@ describe("sale authorization enforcement", () => {
 
   it("executes an approved cancellation and writes an audit entry", async () => {
     db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
-    db.authorizationRequest.findUnique.mockResolvedValue({ id: "request-1", status: "APPROVED", entityType: "Sale", entityId: "sale-1", organizationId: "org-1", branchId: "branch-1", requestedData: { status: "CANCELLED" } });
+    const request = approvedCancellation();
+    db.authorizationRequest.findUnique.mockResolvedValue(request);
+    db.$transaction.mockImplementationOnce(async (callback: any) => callback({
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(request) },
+      sale: {
+        findUnique: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "COMPLETED", items: [] }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      inventoryBalance: { upsert: vi.fn() },
+      inventoryMovement: { create: vi.fn() },
+      auditLog: { create: vi.fn().mockResolvedValue({ id: "audit-1" }) },
+    }));
 
     const result = await executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" });
 
@@ -76,8 +104,16 @@ describe("sale authorization enforcement", () => {
 
   it("executes an approved refund", async () => {
     db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "ENCARGADO_TIENDA" } }] });
-    db.authorizationRequest.findUnique.mockResolvedValue({ id: "request-2", status: "APPROVED", entityType: "Sale", entityId: "sale-1", organizationId: "org-1", branchId: "branch-1", requestedData: { status: "REFUNDED" } });
+    const request = {
+      ...approvedCancellation(),
+      id: "request-2",
+      type: "SALE_REFUND",
+      reason: "Cliente solicita devolución",
+      requestedData: { id: "sale-1", status: "REFUNDED" },
+    };
+    db.authorizationRequest.findUnique.mockResolvedValue(request);
     db.$transaction.mockImplementationOnce(async (callback: any) => callback({
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(request) },
       sale: {
         findUnique: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "COMPLETED", items: [] }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -90,5 +126,39 @@ describe("sale authorization enforcement", () => {
     const result = await executeApprovedSaleChange({ requestId: "request-2", executorId: "manager-2" });
 
     expect(result.status).toBe("REFUNDED");
+  });
+
+  it("rejects a tampered stored integrity hash before executing the sale", async () => {
+    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    const request = { ...approvedCancellation(), integrityHash: "0".repeat(64) };
+    db.authorizationRequest.findUnique.mockResolvedValue(request);
+
+    await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a changed authorization payload even when its stored hash is from the original payload", async () => {
+    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    const original = approvedCancellation();
+    const originalHash = authorizationIntegrityHash({
+      organizationId: original.organizationId,
+      branchId: original.branchId,
+      requestedById: original.requestedById,
+      type: original.type,
+      reason: original.reason,
+      entityType: original.entityType,
+      entityId: original.entityId,
+      beforeData: original.beforeData,
+      requestedData: original.requestedData,
+    });
+    const tampered = {
+      ...original,
+      requestedData: { id: "sale-2", status: "CANCELLED" },
+      integrityHash: originalHash,
+    };
+    db.authorizationRequest.findUnique.mockResolvedValue(tampered);
+
+    await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 });
