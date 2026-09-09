@@ -34,8 +34,11 @@ const authorization = {
   branchId: "branch-1",
   requestedById: "cashier-1",
   status: "APPROVED",
+  type: "SALE_CANCEL",
+  reason: "Cliente solicita cancelación",
   entityType: "Sale",
   entityId: "sale-1",
+  beforeData: { id: "sale-1", status: "COMPLETED" },
   requestedData: { id: "sale-1", status: "CANCELLED" },
 };
 
@@ -51,6 +54,7 @@ describe("authorized sale inventory restoration", () => {
     const movement = vi.fn().mockResolvedValue({});
     const audit = vi.fn().mockResolvedValue({});
     db.$transaction.mockImplementation(async (callback: any) => callback({
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
       sale: { findUnique: vi.fn().mockResolvedValue(sale), updateMany },
       inventoryBalance: { upsert },
       inventoryMovement: { create: movement },
@@ -92,6 +96,7 @@ describe("authorized sale inventory restoration", () => {
     db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
     db.authorizationRequest.findUnique.mockResolvedValue(authorization);
     db.$transaction.mockImplementationOnce(async (callback: any) => callback({
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
       sale: {
         findUnique: vi.fn().mockResolvedValue(sale),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
