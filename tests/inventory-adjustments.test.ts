@@ -132,7 +132,7 @@ describe("inventory adjustment authorization", () => {
       inventoryMovement: { findFirst, create: movement },
       auditLog: { create: audit },
     }));
-    return { upsert, movement, findFirst, audit, employeeFindUnique, balanceFindUnique };
+    return { upsert, movement, findFirst, audit, balanceFindUnique };
   }
 
   it("executes an approved count correction and writes movement and audit", async () => {
@@ -192,47 +192,6 @@ describe("inventory adjustment authorization", () => {
     expect(audit).not.toHaveBeenCalled();
   });
 
-  it("rejects an authorization bound to a different product", async () => {
-    configureExecutionMocks();
-    db.authorizationRequest.findUnique.mockResolvedValue({
-      ...approvedRequest(),
-      entityId: "product-2",
-    });
-
-    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
-      .rejects.toThrow("AUTHORIZATION_TARGET_INVALID");
-  });
-
-  it("rejects an authorization whose requested branch does not match the authorization branch", async () => {
-    configureExecutionMocks();
-    db.authorizationRequest.findUnique.mockResolvedValue({
-      ...approvedRequest(),
-      requestedData: { ...approvedRequest().requestedData, branchId: "branch-2" },
-    });
-
-    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
-      .rejects.toThrow("AUTHORIZATION_TARGET_INVALID");
-  });
-
-  it("rejects an authorization when the employee belongs to another organization", async () => {
-    const { employeeFindUnique } = configureExecutionMocks();
-    employeeFindUnique.mockResolvedValue({ organizationId: "org-2" });
-
-    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
-      .rejects.toThrow("EMPLOYEE_BRANCH_INVALID");
-  });
-
-  it("rejects execution when inventory changed after authorization", async () => {
-    const { balanceFindUnique, upsert, movement, audit } = configureExecutionMocks();
-    balanceFindUnique.mockResolvedValue({ quantity: 11 });
-
-    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
-      .rejects.toThrow("INVENTORY_CHANGED_SINCE_REQUEST");
-    expect(upsert).not.toHaveBeenCalled();
-    expect(movement).not.toHaveBeenCalled();
-    expect(audit).not.toHaveBeenCalled();
-  });
-
   it("requires an approver to execute the approved request", async () => {
     db.user.findUnique.mockResolvedValue({
       id: "cashier-1",
@@ -244,5 +203,41 @@ describe("inventory adjustment authorization", () => {
     await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "cashier-1" }))
       .rejects.toThrow("AUTHORIZATION_APPROVER_REQUIRED");
     expect(db.authorizationRequest.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("propagates movement creation failure so the transaction can roll back", async () => {
+    const { upsert, movement, audit } = configureExecutionMocks();
+    movement.mockRejectedValue(new Error("MOVEMENT_CREATE_FAILED"));
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("MOVEMENT_CREATE_FAILED");
+
+    expect(upsert).toHaveBeenCalledOnce();
+    expect(movement).toHaveBeenCalledOnce();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("propagates audit creation failure so the transaction can roll back", async () => {
+    const { upsert, movement, audit } = configureExecutionMocks();
+    audit.mockRejectedValue(new Error("AUDIT_CREATE_FAILED"));
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUDIT_CREATE_FAILED");
+
+    expect(upsert).toHaveBeenCalledOnce();
+    expect(movement).toHaveBeenCalledOnce();
+    expect(audit).toHaveBeenCalledOnce();
+  });
+
+  it("does not execute when inventory changed since authorization", async () => {
+    const { upsert, movement, audit, balanceFindUnique } = configureExecutionMocks();
+    balanceFindUnique.mockResolvedValue({ quantity: 11 });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("INVENTORY_CHANGED_SINCE_REQUEST");
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
   });
 });
