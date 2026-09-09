@@ -7,6 +7,7 @@ vi.mock("../src/lib/prisma", () => ({
     authorizationApproval: { create: vi.fn() },
     auditLog: { create: vi.fn() },
     $transaction: vi.fn(async (callback: any) => callback({
+      user: { findUnique: vi.fn(async (args: any) => prisma.user.findUnique(args)) },
       authorizationApproval: { create: vi.fn().mockResolvedValue({ id: "approval-1" }) },
       authorizationRequest: { update: vi.fn().mockResolvedValue({ id: "request-1", status: "APPROVED" }) },
       auditLog: { create: vi.fn().mockResolvedValue({ id: "audit-1" }) }
