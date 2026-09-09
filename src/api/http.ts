@@ -12,6 +12,7 @@ import { postOrderIntake } from "./order-intake";
 import { postCreateSaleFromOrder } from "./order-sale";
 import { getCustomerQuery, getCustomers, patchCustomer, postCreateCustomer } from "./customers";
 import { postAuthorizationDecision, postAuthorizationRequest } from "./authorization";
+import { postInventoryAdjustmentExecution, postInventoryAdjustmentRequest } from "./inventory-adjustments";
 import { requireBranchSession } from "../middleware/auth";
 import { requireBranchAuthorizationApprover } from "../middleware/authorization";
 
@@ -38,17 +39,7 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       const auth = await requireOperationalBranch(request, bodyBranchId(body));
       if (!auth.ok) { sendJson(response, auth.status, auth.body); return; }
       const input = body as Record<string, unknown>;
-      const result = await postAuthorizationRequest({
-        organizationId: auth.user.organizationId,
-        branchId: auth.branchId,
-        requestedById: auth.userId,
-        type: typeof input.type === "string" ? input.type : "",
-        reason: typeof input.reason === "string" ? input.reason : "",
-        entityType: typeof input.entityType === "string" ? input.entityType : "",
-        entityId: typeof input.entityId === "string" ? input.entityId : undefined,
-        beforeData: input.beforeData,
-        requestedData: input.requestedData
-      });
+      const result = await postAuthorizationRequest({ organizationId: auth.user.organizationId, branchId: auth.branchId, requestedById: auth.userId, type: typeof input.type === "string" ? input.type : "", reason: typeof input.reason === "string" ? input.reason : "", entityType: typeof input.entityType === "string" ? input.entityType : "", entityId: typeof input.entityId === "string" ? input.entityId : undefined, beforeData: input.beforeData, requestedData: input.requestedData });
       sendJson(response, result.status, result.body); return;
     }
 
@@ -60,18 +51,26 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       const input = body as Record<string, unknown>;
       const decision = input.decision === "APPROVED" || input.decision === "REJECTED" ? input.decision : undefined;
       if (!decision) { sendJson(response, 400, { error: "DECISION_REQUIRED" }); return; }
-      const result = await postAuthorizationDecision({
-        requestId: decodeURIComponent(authorizationDecisionMatch[1]),
-        approverId: auth.userId,
-        decision,
-        notes: typeof input.notes === "string" ? input.notes : undefined
-      });
+      const result = await postAuthorizationDecision({ requestId: decodeURIComponent(authorizationDecisionMatch[1]), approverId: auth.userId, decision, notes: typeof input.notes === "string" ? input.notes : undefined });
       sendJson(response, result.status, result.body); return;
     }
 
     if (method === "GET" && url.pathname === "/inventory") { const branchId = url.searchParams.get("branchId") ?? undefined; const auth = await requireOperationalBranch(request, branchId); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const productId = url.searchParams.get("productId"); const result = productId ? await getInventory({ branchId: auth.branchId, productId }) : await getInventoryList({ branchId: auth.branchId, search: url.searchParams.get("search") ?? undefined, limit: queryNumber(url.searchParams.get("limit"), 50) }); sendJson(response, result.status, result.body); return; }
     if (method === "GET" && url.pathname === "/inventory/movements") { const branchId = url.searchParams.get("branchId") ?? undefined; const auth = await requireOperationalBranch(request, branchId); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const result = await getInventoryMovements({ branchId: auth.branchId, productId: url.searchParams.get("productId") ?? undefined, limit: queryNumber(url.searchParams.get("limit"), 100) }); sendJson(response, result.status, result.body); return; }
     if (method === "GET" && url.pathname === "/inventory/replenishment") { const branchId = url.searchParams.get("branchId") ?? undefined; const auth = await requireOperationalBranch(request, branchId); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } const result = await getInventoryReplenishmentQuery({ branchId: auth.branchId, productId: url.searchParams.get("productId") ?? undefined, days: queryNumber(url.searchParams.get("days"), 30), limit: queryNumber(url.searchParams.get("limit"), 200) }); sendJson(response, result.status, result.body); return; }
+
+    if (method === "POST" && (url.pathname === "/inventory/adjustments" || url.pathname === "/inventory/adjustments/execute")) {
+      const body = await readJson(request);
+      const auth = await requireOperationalBranch(request, bodyBranchId(body));
+      if (!auth.ok) { sendJson(response, auth.status, auth.body); return; }
+      const input = body as Record<string, unknown>;
+      if (url.pathname === "/inventory/adjustments") {
+        const result = await postInventoryAdjustmentRequest({ branchId: auth.branchId, productId: typeof input.productId === "string" ? input.productId : "", requestedById: auth.userId, employeeId: typeof input.employeeId === "string" ? input.employeeId : "", type: input.type as any, quantity: typeof input.quantity === "number" ? input.quantity : Number(input.quantity), reason: typeof input.reason === "string" ? input.reason : "", unitCost: typeof input.unitCost === "number" ? input.unitCost : undefined });
+        sendJson(response, result.status, result.body); return;
+      }
+      const result = await postInventoryAdjustmentExecution({ requestId: typeof input.requestId === "string" ? input.requestId : "", executorId: auth.userId });
+      sendJson(response, result.status, result.body); return;
+    }
 
     if (method === "POST" && (url.pathname === "/inventory/physical-counts" || url.pathname === "/inventory/physical-counts/execute" || url.pathname === "/purchases" || url.pathname === "/purchases/execute")) { const body = await readJson(request); const auth = await requireOperationalBranch(request, bodyBranchId(body)); if (!auth.ok) { sendJson(response, auth.status, auth.body); return; } if (url.pathname === "/inventory/physical-counts") { const result = await postPhysicalCountRequest(body as any); sendJson(response, result.status, result.body); return; } if (url.pathname === "/inventory/physical-counts/execute") { const result = await postPhysicalCountExecution(body as any); sendJson(response, result.status, result.body); return; } if (url.pathname === "/purchases") { const result = await postPurchaseRequest(body as any); sendJson(response, result.status, result.body); return; } const result = await postPurchaseExecution(body as any); sendJson(response, result.status, result.body); return; }
 
@@ -107,4 +106,3 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
     sendJson(response, 404, { error: "NOT_FOUND" });
   } catch (error) { if (error instanceof Error && error.message === "INVALID_JSON") { sendJson(response, 400, { error: "INVALID_JSON", message: "Request body must be valid JSON." }); return; } sendJson(response, 500, { error: "INTERNAL_SERVER_ERROR" }); }
 }
-export function createHttpServer() { return createServer((request, response) => { void handleRequest(request, response); }); }
