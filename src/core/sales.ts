@@ -8,6 +8,8 @@ const TARGET_STATUS = {
   SALE_REFUND: "REFUNDED",
 } as const;
 
+type SaleAuthorizationPayload = { id?: string; status?: string };
+
 export async function requestSaleChange(input: {
   saleId: string;
   requestedById: string;
@@ -15,6 +17,7 @@ export async function requestSaleChange(input: {
   reason: string;
 }) {
   if (!input.reason.trim()) throw new Error("AUTHORIZATION_REASON_REQUIRED");
+  if (input.type !== "SALE_CANCEL" && input.type !== "SALE_REFUND") throw new Error("AUTHORIZATION_TYPE_INVALID");
 
   const sale = await prisma.sale.findUnique({ where: { id: input.saleId } });
   if (!sale) throw new Error("SALE_NOT_FOUND");
@@ -42,85 +45,50 @@ export async function executeApprovedSaleChange(input: {
     throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
   }
 
-  const authorization = await prisma.authorizationRequest.findUnique({
-    where: { id: input.requestId },
-  });
+  const authorization = await prisma.authorizationRequest.findUnique({ where: { id: input.requestId } });
   if (!authorization) throw new Error("AUTHORIZATION_NOT_FOUND");
   if (authorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
-  if (authorization.type !== "SALE_CANCEL" && authorization.type !== "SALE_REFUND") {
-    throw new Error("AUTHORIZATION_TYPE_INVALID");
-  }
-  if (authorization.entityType !== "Sale" || !authorization.entityId) {
-    throw new Error("AUTHORIZATION_ENTITY_INVALID");
-  }
+  if (authorization.type !== "SALE_CANCEL" && authorization.type !== "SALE_REFUND") throw new Error("AUTHORIZATION_TYPE_INVALID");
+  if (authorization.entityType !== "Sale" || !authorization.entityId) throw new Error("AUTHORIZATION_ENTITY_INVALID");
 
-  const expectedIntegrityHash = authorizationIntegrityHash({
-    organizationId: authorization.organizationId,
-    branchId: authorization.branchId ?? undefined,
-    requestedById: authorization.requestedById,
-    type: authorization.type,
-    reason: authorization.reason,
-    entityType: authorization.entityType,
-    entityId: authorization.entityId ?? undefined,
-    beforeData: authorization.beforeData,
-    requestedData: authorization.requestedData,
-  });
-  if (authorization.integrityHash && authorization.integrityHash !== expectedIntegrityHash) {
-    throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
-  }
-
-  const expectedStatus = TARGET_STATUS[authorization.type as SaleChangeType];
-  const requested = authorization.requestedData as { id?: string; status?: string } | null;
-  if (requested?.id !== authorization.entityId || requested.status !== expectedStatus) {
-    throw new Error("AUTHORIZATION_TARGET_INVALID");
-  }
+  const expectedStatus = TARGET_STATUS[authorization.type];
+  assertSaleAuthorizationPayload(authorization, expectedStatus);
+  assertSaleAuthorizationIntegrity(authorization);
 
   return prisma.$transaction(async (tx) => {
-    const currentAuthorization = await tx.authorizationRequest.findUnique({
-      where: { id: authorization.id },
-    });
+    // Serialize execution of the authorization so the same approved request cannot be consumed twice concurrently.
+    await tx.$queryRaw`SELECT "id" FROM "AuthorizationRequest" WHERE "id" = ${authorization.id} FOR UPDATE`;
+
+    const currentAuthorization = await tx.authorizationRequest.findUnique({ where: { id: authorization.id } });
     if (!currentAuthorization) throw new Error("AUTHORIZATION_NOT_FOUND");
     if (currentAuthorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
-
-    const currentHash = authorizationIntegrityHash({
-      organizationId: currentAuthorization.organizationId,
-      branchId: currentAuthorization.branchId ?? undefined,
-      requestedById: currentAuthorization.requestedById,
-      type: currentAuthorization.type,
-      reason: currentAuthorization.reason,
-      entityType: currentAuthorization.entityType,
-      entityId: currentAuthorization.entityId ?? undefined,
-      beforeData: currentAuthorization.beforeData,
-      requestedData: currentAuthorization.requestedData,
-    });
-    if (currentAuthorization.integrityHash && currentAuthorization.integrityHash !== currentHash) {
+    if (currentAuthorization.organizationId !== authorization.organizationId || currentAuthorization.branchId !== authorization.branchId || currentAuthorization.entityType !== "Sale" || currentAuthorization.entityId !== authorization.entityId) {
+      throw new Error("AUTHORIZATION_ENTITY_INVALID");
+    }
+    if (currentAuthorization.type !== authorization.type || currentAuthorization.reason !== authorization.reason || currentAuthorization.requestedById !== authorization.requestedById) {
       throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     }
+
+    assertSaleAuthorizationIntegrity(currentAuthorization);
     if (authorization.integrityHash && currentAuthorization.integrityHash !== authorization.integrityHash) {
       throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     }
-
-    if (currentAuthorization.entityType !== "Sale" || currentAuthorization.entityId !== authorization.entityId) {
-      throw new Error("AUTHORIZATION_ENTITY_INVALID");
-    }
-    if (currentAuthorization.type !== authorization.type || currentAuthorization.reason !== authorization.reason) {
-      throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
-    }
-
-    const currentRequested = currentAuthorization.requestedData as { id?: string; status?: string } | null;
-    if (currentRequested?.id !== currentAuthorization.entityId || currentRequested.status !== expectedStatus) {
-      throw new Error("AUTHORIZATION_TARGET_INVALID");
-    }
+    assertSaleAuthorizationPayload(currentAuthorization, expectedStatus);
 
     const sale = await tx.sale.findUnique({
       where: { id: authorization.entityId! },
       include: { items: true },
     });
     if (!sale) throw new Error("SALE_NOT_FOUND");
-    if (sale.branchId !== authorization.branchId) throw new Error("AUTHORIZATION_BRANCH_INVALID");
+    if (sale.branchId !== currentAuthorization.branchId) throw new Error("AUTHORIZATION_BRANCH_INVALID");
+
+    const before = currentAuthorization.beforeData as SaleAuthorizationPayload | null;
+    if (before?.id !== sale.id || before.status !== sale.status) {
+      throw new Error("AUTHORIZATION_TARGET_INVALID");
+    }
     if (sale.status !== "COMPLETED") throw new Error("SALE_ALREADY_CHANGED");
 
-    const status = targetStatusFor(authorization.type);
+    const status = targetStatusFor(currentAuthorization.type);
 
     // Conditional update makes execution single-use even under concurrent requests.
     const changed = await tx.sale.updateMany({
@@ -147,15 +115,15 @@ export async function executeApprovedSaleChange(input: {
           referenceId: sale.id,
           userId: input.executorId,
           occurredAt: new Date(),
-          notes: `Reversión de inventario por ${status === "CANCELLED" ? "cancelación" : "devolución"} autorizada. Solicitud ${authorization.id}.`,
+          notes: `Reversión de inventario por ${status === "CANCELLED" ? "cancelación" : "devolución"} autorizada. Solicitud ${currentAuthorization.id}.`,
         },
       });
     }
 
     await tx.auditLog.create({
       data: {
-        organizationId: authorization.organizationId,
-        branchId: authorization.branchId,
+        organizationId: currentAuthorization.organizationId,
+        branchId: currentAuthorization.branchId,
         userId: input.executorId,
         action: `SALE_${status}`,
         entityType: "Sale",
@@ -168,7 +136,7 @@ export async function executeApprovedSaleChange(input: {
         afterData: {
           id: sale.id,
           status,
-          authorizationRequestId: authorization.id,
+          authorizationRequestId: currentAuthorization.id,
           inventoryRestored: true,
         },
       },
@@ -176,6 +144,48 @@ export async function executeApprovedSaleChange(input: {
 
     return { ...sale, status };
   });
+}
+
+function assertSaleAuthorizationPayload(authorization: {
+  entityId: string | null;
+  beforeData: unknown;
+  requestedData: unknown;
+}, expectedStatus: string) {
+  const before = authorization.beforeData as SaleAuthorizationPayload | null;
+  const requested = authorization.requestedData as SaleAuthorizationPayload | null;
+  if (before?.id !== authorization.entityId || before.status !== "COMPLETED") {
+    throw new Error("AUTHORIZATION_TARGET_INVALID");
+  }
+  if (requested?.id !== authorization.entityId || requested.status !== expectedStatus) {
+    throw new Error("AUTHORIZATION_TARGET_INVALID");
+  }
+}
+
+function assertSaleAuthorizationIntegrity(authorization: {
+  organizationId: string;
+  branchId: string | null;
+  requestedById: string;
+  type: string;
+  reason: string;
+  entityType: string;
+  entityId: string | null;
+  beforeData: unknown;
+  requestedData: unknown;
+  integrityHash: string | null;
+}) {
+  if (!authorization.integrityHash) return;
+  const expected = authorizationIntegrityHash({
+    organizationId: authorization.organizationId,
+    branchId: authorization.branchId ?? undefined,
+    requestedById: authorization.requestedById,
+    type: authorization.type,
+    reason: authorization.reason,
+    entityType: authorization.entityType,
+    entityId: authorization.entityId ?? undefined,
+    beforeData: authorization.beforeData,
+    requestedData: authorization.requestedData,
+  });
+  if (authorization.integrityHash !== expected) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
 }
 
 function targetStatusFor(type: string) {
