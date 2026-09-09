@@ -106,6 +106,9 @@ describe("inventory adjustment authorization", () => {
   }
 
   function configureExecutionMocks(existingMovement: unknown = null) {
+    const currentAuthorization = approvedRequest();
+    const currentAuthorizationFindUnique = vi.fn().mockResolvedValue(currentAuthorization);
+
     db.user.findUnique.mockImplementation(({ where }: any) => {
       if (where?.id === "manager-1") {
         return Promise.resolve({
@@ -125,14 +128,30 @@ describe("inventory adjustment authorization", () => {
     const movement = vi.fn().mockResolvedValue({});
     const findFirst = vi.fn().mockResolvedValue(existingMovement);
     const audit = vi.fn().mockResolvedValue({});
+    const executorFindUnique = vi.fn().mockResolvedValue({
+      id: "manager-1",
+      organizationId: "org-1",
+      status: "ACTIVE",
+      branchAccess: [{ branchId: "branch-1" }],
+    });
     db.$transaction.mockImplementation(async (callback: any) => callback({
       $queryRaw: vi.fn().mockResolvedValue([]),
+      user: { findUnique: executorFindUnique },
+      authorizationRequest: { findUnique: currentAuthorizationFindUnique },
       employee: { findUnique: employeeFindUnique },
       inventoryBalance: { findUnique: balanceFindUnique, upsert },
       inventoryMovement: { findFirst, create: movement },
       auditLog: { create: audit },
     }));
-    return { upsert, movement, findFirst, audit, balanceFindUnique };
+    return {
+      upsert,
+      movement,
+      findFirst,
+      audit,
+      balanceFindUnique,
+      currentAuthorizationFindUnique,
+      executorFindUnique,
+    };
   }
 
   it("executes an approved count correction and writes movement and audit", async () => {
@@ -235,6 +254,50 @@ describe("inventory adjustment authorization", () => {
 
     await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
       .rejects.toThrow("INVENTORY_CHANGED_SINCE_REQUEST");
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("revalidates authorization status inside the execution transaction", async () => {
+    const { upsert, movement, audit, currentAuthorizationFindUnique } = configureExecutionMocks();
+    currentAuthorizationFindUnique.mockResolvedValue({ ...approvedRequest(), status: "REJECTED" });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_NOT_APPROVED");
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a changed authorization payload at the transaction boundary", async () => {
+    const { upsert, movement, audit, currentAuthorizationFindUnique } = configureExecutionMocks();
+    currentAuthorizationFindUnique.mockResolvedValue({
+      ...approvedRequest(),
+      requestedData: { ...approvedRequest().requestedData, quantity: 99 },
+    });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_TARGET_INVALID");
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("revalidates executor status and branch access inside the execution transaction", async () => {
+    const { upsert, movement, audit, executorFindUnique } = configureExecutionMocks();
+    executorFindUnique.mockResolvedValue({
+      id: "manager-1",
+      organizationId: "org-1",
+      status: "INACTIVE",
+      branchAccess: [],
+    });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_SCOPE_FORBIDDEN");
 
     expect(upsert).not.toHaveBeenCalled();
     expect(movement).not.toHaveBeenCalled();
