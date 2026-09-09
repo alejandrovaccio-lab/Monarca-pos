@@ -52,8 +52,10 @@ export async function executeApprovedSaleChange(input: {
   if (authorization.entityType !== "Sale" || !authorization.entityId) throw new Error("AUTHORIZATION_ENTITY_INVALID");
 
   const expectedStatus = TARGET_STATUS[authorization.type];
-  assertSaleAuthorizationPayload(authorization, expectedStatus);
+  // Integrity must be checked before validating the mutable target payload so tampering
+  // with an authorization is classified as an integrity violation, not a target error.
   assertSaleAuthorizationIntegrity(authorization);
+  assertSaleAuthorizationPayload(authorization, expectedStatus);
 
   return prisma.$transaction(async (tx) => {
     // Serialize execution of the authorization so the same approved request cannot be consumed twice concurrently.
