@@ -109,9 +109,6 @@ export async function executeApprovedInventoryAdjustment(input: { requestId: str
     if (currentAuthorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
     if (currentAuthorization.entityType !== "InventoryBalance" || currentAuthorization.entityId !== authorization.entityId || currentAuthorization.organizationId !== authorization.organizationId || currentAuthorization.branchId !== authorization.branchId) throw new Error("AUTHORIZATION_TARGET_INVALID");
 
-    const currentRequested = parseAuthorizedInventoryPayload(currentAuthorization.requestedData);
-    if (currentRequested.branchId !== currentAuthorization.branchId || currentRequested.productId !== currentAuthorization.entityId) throw new Error("AUTHORIZATION_TARGET_INVALID");
-
     const currentHash = authorizationIntegrityHash({
       organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId ?? undefined,
       requestedById: currentAuthorization.requestedById, type: currentAuthorization.type, reason: currentAuthorization.reason,
@@ -120,6 +117,9 @@ export async function executeApprovedInventoryAdjustment(input: { requestId: str
     });
     if (currentAuthorization.integrityHash && currentAuthorization.integrityHash !== currentHash) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     if (authorization.integrityHash && currentAuthorization.integrityHash !== authorization.integrityHash) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+
+    const currentRequested = parseAuthorizedInventoryPayload(currentAuthorization.requestedData);
+    if (currentRequested.branchId !== currentAuthorization.branchId || currentRequested.productId !== currentAuthorization.entityId) throw new Error("AUTHORIZATION_TARGET_INVALID");
     if (!sameAuthorizedInventoryPayload(currentAuthorization.requestedData, authorization.requestedData)) throw new Error("AUTHORIZATION_TARGET_INVALID");
 
     const currentExecutor = await tx.user.findUnique({ where: { id: input.executorId }, select: { id: true, organizationId: true, status: true, branchAccess: { where: { branchId: currentAuthorization.branchId ?? "" }, select: { branchId: true } } } });
