@@ -8,6 +8,7 @@ vi.mock("../src/lib/prisma", () => ({
     authorizationRequest: { create: vi.fn(), findUnique: vi.fn() },
     auditLog: { create: vi.fn() },
     $transaction: vi.fn(async (callback: any) => callback({
+      $queryRaw: vi.fn(),
       authorizationRequest: { findUnique: vi.fn() },
       sale: {
         findUnique: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "COMPLETED", items: [] }),
@@ -86,6 +87,7 @@ describe("sale authorization enforcement", () => {
     const request = approvedCancellation();
     db.authorizationRequest.findUnique.mockResolvedValue(request);
     db.$transaction.mockImplementationOnce(async (callback: any) => callback({
+      $queryRaw: vi.fn(),
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(request) },
       sale: {
         findUnique: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "COMPLETED", items: [] }),
@@ -113,6 +115,7 @@ describe("sale authorization enforcement", () => {
     };
     db.authorizationRequest.findUnique.mockResolvedValue(request);
     db.$transaction.mockImplementationOnce(async (callback: any) => callback({
+      $queryRaw: vi.fn(),
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(request) },
       sale: {
         findUnique: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "COMPLETED", items: [] }),
@@ -160,5 +163,31 @@ describe("sale authorization enforcement", () => {
 
     await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
     expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects an authorization whose before-state does not match the completed sale", async () => {
+    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    const request = { ...approvedCancellation(), beforeData: { id: "sale-1", status: "CANCELLED" } };
+    db.authorizationRequest.findUnique.mockResolvedValue(request);
+
+    await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_TARGET_INVALID");
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the authorization changes organization or branch inside the transaction", async () => {
+    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    const request = approvedCancellation();
+    db.authorizationRequest.findUnique.mockResolvedValue(request);
+    const currentAuthorization = { ...request, organizationId: "org-2" };
+    db.$transaction.mockImplementationOnce(async (callback: any) => callback({
+      $queryRaw: vi.fn(),
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(currentAuthorization) },
+      sale: { findUnique: vi.fn(), updateMany: vi.fn() },
+      inventoryBalance: { upsert: vi.fn() },
+      inventoryMovement: { create: vi.fn() },
+      auditLog: { create: vi.fn() },
+    }));
+
+    await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_ENTITY_INVALID");
   });
 });
