@@ -154,9 +154,48 @@ export async function executeApprovedInventoryAdjustment(input: {
   if (expectedDelta !== delta) throw new Error("AUTHORIZATION_TARGET_INVALID");
 
   return prisma.$transaction(async (tx) => {
-    // Serialize execution for this authorization so two concurrent executors
-    // cannot both apply the same approved request.
+    // Lock and re-read the authorization so execution uses the current,
+    // approved request state rather than a stale pre-transaction snapshot.
     await tx.$queryRaw`SELECT "id" FROM "AuthorizationRequest" WHERE "id" = ${authorization.id} FOR UPDATE`;
+
+    const currentAuthorization = await tx.authorizationRequest.findUnique({
+      where: { id: authorization.id },
+    });
+    if (!currentAuthorization) throw new Error("AUTHORIZATION_NOT_FOUND");
+    if (currentAuthorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
+    if (
+      currentAuthorization.entityType !== "InventoryBalance" ||
+      currentAuthorization.entityId !== authorization.entityId ||
+      currentAuthorization.organizationId !== authorization.organizationId ||
+      currentAuthorization.branchId !== authorization.branchId
+    ) {
+      throw new Error("AUTHORIZATION_TARGET_INVALID");
+    }
+    if (JSON.stringify(currentAuthorization.requestedData) !== JSON.stringify(authorization.requestedData)) {
+      throw new Error("AUTHORIZATION_TARGET_INVALID");
+    }
+
+    // Revalidate the executor inside the same transaction so a concurrent
+    // deactivation or scope change cannot race the execution boundary.
+    const currentExecutor = await tx.user.findUnique({
+      where: { id: input.executorId },
+      select: {
+        id: true,
+        organizationId: true,
+        status: true,
+        branchAccess: { where: { branchId: currentAuthorization.branchId ?? "" }, select: { branchId: true } },
+      },
+    });
+    if (
+      !currentExecutor ||
+      currentExecutor.status !== "ACTIVE" ||
+      currentExecutor.organizationId !== currentAuthorization.organizationId
+    ) {
+      throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+    }
+    if (currentAuthorization.branchId && !currentExecutor.branchAccess.length) {
+      throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+    }
 
     const alreadyExecuted = await tx.inventoryMovement.findFirst({
       where: { referenceType: `MANUAL_${adjustmentType}`, referenceId: authorization.id },
