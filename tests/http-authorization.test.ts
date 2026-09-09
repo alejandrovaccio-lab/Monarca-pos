@@ -1,9 +1,9 @@
 import { Readable } from "node:stream";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { requireBranchSession, requireBranchAuthorizationApprover, postAuthorizationRequest, postAuthorizationDecision, postInventoryAdjustmentRequest, postInventoryAdjustmentExecution } = vi.hoisted(() => ({
+const { requireBranchSession, requireAuthorizationDecisionApprover, postAuthorizationRequest, postAuthorizationDecision, postInventoryAdjustmentRequest, postInventoryAdjustmentExecution } = vi.hoisted(() => ({
   requireBranchSession: vi.fn(),
-  requireBranchAuthorizationApprover: vi.fn(),
+  requireAuthorizationDecisionApprover: vi.fn(),
   postAuthorizationRequest: vi.fn(),
   postAuthorizationDecision: vi.fn(),
   postInventoryAdjustmentRequest: vi.fn(),
@@ -11,7 +11,7 @@ const { requireBranchSession, requireBranchAuthorizationApprover, postAuthorizat
 }));
 
 vi.mock("../src/middleware/auth", () => ({ requireBranchSession }));
-vi.mock("../src/middleware/authorization", () => ({ requireBranchAuthorizationApprover }));
+vi.mock("../src/middleware/authorization", () => ({ requireAuthorizationDecisionApprover }));
 vi.mock("../src/api/authorization", () => ({ postAuthorizationRequest, postAuthorizationDecision }));
 vi.mock("../src/api/inventory-adjustments", () => ({ postInventoryAdjustmentRequest, postInventoryAdjustmentExecution }));
 vi.mock("../src/api/auth", () => ({ getMe: vi.fn(), postLogin: vi.fn(), postLogout: vi.fn() }));
@@ -97,7 +97,7 @@ describe("HTTP authorization boundary", () => {
   });
 
   it("requires an authenticated approver before resolving an authorization", async () => {
-    requireBranchAuthorizationApprover.mockResolvedValue(null);
+    requireAuthorizationDecisionApprover.mockResolvedValue(null);
     const res = response();
 
     await handleRequest(request("POST", "/authorizations/auth-1/decision", { branchId: "branch-1", approverId: "attacker", decision: "APPROVED" }), res);
@@ -107,18 +107,19 @@ describe("HTTP authorization boundary", () => {
   });
 
   it("derives the approver identity from the authenticated session", async () => {
-    requireBranchAuthorizationApprover.mockResolvedValue(approverContext);
+    requireAuthorizationDecisionApprover.mockResolvedValue(approverContext);
     postAuthorizationDecision.mockResolvedValue({ status: 200, body: { ok: true } });
     const res = response();
 
     await handleRequest(request("POST", "/authorizations/auth-1/decision", { branchId: "branch-1", approverId: "attacker", decision: "APPROVED", notes: "approved" }), res);
 
     expect(res.status).toBe(200);
+    expect(requireAuthorizationDecisionApprover).toHaveBeenCalledWith("session-token", "auth-1");
     expect(postAuthorizationDecision).toHaveBeenCalledWith({ requestId: "auth-1", approverId: "manager-1", decision: "APPROVED", notes: "approved" });
   });
 
-  it("does not resolve an authorization when the branch session is invalid", async () => {
-    requireBranchAuthorizationApprover.mockResolvedValue(null);
+  it("does not resolve an authorization when the derived decision session is invalid", async () => {
+    requireAuthorizationDecisionApprover.mockResolvedValue(null);
     const res = response();
 
     await handleRequest(request("POST", "/authorizations/auth-1/decision", { branchId: "branch-2", decision: "APPROVED" }, "bad-token"), res);
@@ -128,7 +129,7 @@ describe("HTTP authorization boundary", () => {
   });
 
   it("validates the decision before invoking the authorization core", async () => {
-    requireBranchAuthorizationApprover.mockResolvedValue(approverContext);
+    requireAuthorizationDecisionApprover.mockResolvedValue(approverContext);
     const res = response();
 
     await handleRequest(request("POST", "/authorizations/auth-1/decision", { branchId: "branch-1" }), res);
