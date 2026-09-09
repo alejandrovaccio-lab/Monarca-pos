@@ -5,12 +5,12 @@ function authorizationError(error: unknown) {
   const status = code === "AUTHORIZATION_APPROVER_REQUIRED" || code === "AUTHORIZATION_REQUESTER_REQUIRED" || code === "AUTHORIZATION_SCOPE_FORBIDDEN" || code === "SELF_APPROVAL_NOT_ALLOWED" ? 403
     : code === "AUTHORIZATION_NOT_FOUND" ? 404
     : code === "AUTHORIZATION_ALREADY_RESOLVED" ? 409
+    : code === "AUTHORIZATION_TYPE_INVALID" || code === "AUTHORIZATION_REASON_REQUIRED" || code === "AUTHORIZATION_ENTITY_REQUIRED" ? 400
     : 500;
   return { status, body: { error: code } };
 }
 
 export async function postAuthorizationRequest(input: Parameters<typeof requestAuthorization>[0]) {
-  if (!input.reason?.trim()) return { status: 400, body: { error: "REASON_REQUIRED" } };
   try {
     const request = await requestAuthorization(input);
     return { status: 201, body: request };
