@@ -37,6 +37,8 @@ function parseAuthorizedInventoryPayload(value: unknown): AuthorizedInventoryPay
     typeof payload.resultingQuantity !== "number" || (payload.unitCost !== null && typeof payload.unitCost !== "number")
   ) throw new Error("AUTHORIZATION_TARGET_INVALID");
   const adjustmentType = payload.adjustmentType as InventoryAdjustmentType;
+  if (!INVENTORY_ADJUSTMENT_TYPES.has(adjustmentType)) throw new Error("AUTHORIZATION_TARGET_INVALID");
+  if (!Number.isFinite(payload.quantity) || payload.quantity <= 0 || !Number.isFinite(payload.delta)) throw new Error("AUTHORIZATION_TARGET_INVALID");
   if (deltaFor(adjustmentType, payload.quantity) !== payload.delta || !Number.isFinite(payload.resultingQuantity)) throw new Error("AUTHORIZATION_TARGET_INVALID");
   if (payload.unitCost !== null && (!Number.isFinite(payload.unitCost) || payload.unitCost < 0)) throw new Error("AUTHORIZATION_TARGET_INVALID");
   return {
