@@ -2,6 +2,12 @@ import { prisma } from "../lib/prisma";
 
 export const APPROVER_ROLES = new Set(["ENCARGADO_TIENDA", "GERENTE", "ADMIN", "SUPER_ADMIN"]);
 
+export const AUTHORIZATION_TYPES = new Set([
+  "PRICE_CHANGE", "MARGIN_CHANGE", "DISCOUNT_EXCEPTION", "SALE_CANCEL", "SALE_REFUND",
+  "INVENTORY_ADJUSTMENT", "WASTE_EXCEPTION", "SHRINKAGE_EXCEPTION", "COST_CHANGE", "TAX_CHANGE",
+  "REGISTER_EXCEPTION", "ACCESS_CHANGE", "ORDER_ADJUSTMENT", "OTHER"
+]);
+
 export async function hasPermission(userId: string, permissionCode: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -21,6 +27,16 @@ export async function requestAuthorization(input: {
   organizationId: string; branchId?: string; requestedById: string; type: string; reason: string;
   entityType: string; entityId?: string; beforeData?: unknown; requestedData?: unknown;
 }) {
+  if (!AUTHORIZATION_TYPES.has(input.type)) {
+    throw new Error("AUTHORIZATION_TYPE_INVALID");
+  }
+  if (!input.reason?.trim()) {
+    throw new Error("AUTHORIZATION_REASON_REQUIRED");
+  }
+  if (!input.entityType?.trim()) {
+    throw new Error("AUTHORIZATION_ENTITY_REQUIRED");
+  }
+
   const requester = await prisma.user.findUnique({
     where: { id: input.requestedById },
     include: { branchAccess: true }
@@ -70,8 +86,6 @@ export async function resolveAuthorization(input: {
 
   const status = input.decision;
   return prisma.$transaction(async (tx) => {
-    // Atomically claim the pending request. The unique id plus PENDING status
-    // condition prevents a second concurrent approver from resolving it.
     let claimed;
     try {
       claimed = await tx.authorizationRequest.update({
