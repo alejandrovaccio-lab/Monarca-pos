@@ -26,6 +26,8 @@ const request = {
   branchId: "branch-1",
   requestedById: "cashier-1",
   status: "PENDING",
+  type: "SALE_CANCEL",
+  reason: "Autorización de prueba",
   entityType: "ProductPrice",
   entityId: "product-1",
   beforeData: { price: 10 },
@@ -36,6 +38,7 @@ function transactionMock(options: { update?: unknown; approval?: unknown; audit?
   const tx = {
     user: { findUnique: vi.fn().mockResolvedValue(approver) },
     authorizationRequest: {
+      findUnique: vi.fn().mockResolvedValue(request),
       update: vi.fn(async () => {
         if (options.updateError) throw options.updateError;
         return options.update ?? { ...request, status: "APPROVED", resolvedAt: new Date() };
