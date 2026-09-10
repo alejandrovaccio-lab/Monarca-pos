@@ -106,8 +106,13 @@ export async function resolveAuthorization(input: {
       beforeData: currentRequest.beforeData,
       requestedData: currentRequest.requestedData
     });
-    if (currentRequest.integrityHash !== expectedIntegrityHash || currentRequest.integrityHash !== request.integrityHash) {
-      throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    // The migration intentionally keeps integrityHash nullable so legacy requests
+    // can still be resolved. Any request that already carries a hash must pass the
+    // full integrity check, and all newly created requests receive a hash.
+    if (currentRequest.integrityHash || request.integrityHash) {
+      if (currentRequest.integrityHash !== expectedIntegrityHash || currentRequest.integrityHash !== request.integrityHash) {
+        throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+      }
     }
 
     let claimed;
