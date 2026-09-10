@@ -112,4 +112,130 @@ describe("authorization decision input", () => {
       body: { error: "AUTHORIZATION_REASON_TOO_LONG" }
     });
   });
+
+  it("rejects oversized required request identifiers before database access", async () => {
+    const cases = [
+      ["organizationId", "AUTHORIZATION_ORGANIZATION_INVALID"],
+      ["requestedById", "AUTHORIZATION_REQUESTER_INVALID"],
+      ["entityId", "AUTHORIZATION_ENTITY_ID_INVALID"]
+    ] as const;
+
+    for (const [field, errorCode] of cases) {
+      const input: any = {
+        organizationId: "org-1",
+        branchId: "branch-1",
+        requestedById: "cashier-1",
+        type: "SALE_CANCEL",
+        reason: "Prueba",
+        entityType: "Sale",
+        entityId: "sale-1"
+      };
+      input[field] = "x".repeat(129);
+
+      await expect(requestAuthorization(input)).rejects.toThrow(errorCode);
+    }
+
+    expect(db.user.findUnique).not.toHaveBeenCalled();
+    expect(db.authorizationRequest.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized optional branch identifier when provided", async () => {
+    await expect(requestAuthorization({
+      organizationId: "org-1",
+      branchId: "x".repeat(129),
+      requestedById: "cashier-1",
+      type: "SALE_CANCEL",
+      reason: "Prueba",
+      entityType: "Sale",
+      entityId: "sale-1"
+    })).rejects.toThrow("AUTHORIZATION_BRANCH_INVALID");
+
+    expect(db.user.findUnique).not.toHaveBeenCalled();
+    expect(db.authorizationRequest.create).not.toHaveBeenCalled();
+  });
+
+  it("allows omitted optional branch and entity identifiers", async () => {
+    db.authorizationRequest.create.mockResolvedValue({ id: "auth-global", status: "PENDING" });
+
+    await expect(requestAuthorization({
+      organizationId: "org-1",
+      requestedById: "cashier-1",
+      type: "ACCESS_CHANGE",
+      reason: "Prueba global",
+      entityType: "User"
+    })).resolves.toMatchObject({ id: "auth-global", status: "PENDING" });
+
+    expect(db.authorizationRequest.create).toHaveBeenCalledOnce();
+  });
+
+  it("rejects oversized decision request and approver identifiers before database access", async () => {
+    await expect(resolveAuthorization({
+      requestId: "x".repeat(129),
+      approverId: "manager-1",
+      decision: "APPROVED"
+    })).rejects.toThrow("AUTHORIZATION_REQUEST_ID_INVALID");
+
+    await expect(resolveAuthorization({
+      requestId: "request-1",
+      approverId: "x".repeat(129),
+      decision: "APPROVED"
+    })).rejects.toThrow("AUTHORIZATION_APPROVER_ID_INVALID");
+
+    expect(db.user.findUnique).not.toHaveBeenCalled();
+    expect(db.authorizationRequest.findUnique).not.toHaveBeenCalled();
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("maps oversized decision identifiers to HTTP 400", async () => {
+    const requestResult = await postAuthorizationDecision({
+      requestId: "x".repeat(129),
+      approverId: "manager-1",
+      decision: "APPROVED"
+    });
+    expect(requestResult).toEqual({
+      status: 400,
+      body: { error: "AUTHORIZATION_REQUEST_ID_INVALID" }
+    });
+
+    const approverResult = await postAuthorizationDecision({
+      requestId: "request-1",
+      approverId: "x".repeat(129),
+      decision: "APPROVED"
+    });
+    expect(approverResult).toEqual({
+      status: 400,
+      body: { error: "AUTHORIZATION_APPROVER_ID_INVALID" }
+    });
+  });
+
+  it("rejects an oversized entity type and maps it to HTTP 400", async () => {
+    const entityType = "E".repeat(65);
+
+    await expect(requestAuthorization({
+      organizationId: "org-1",
+      branchId: "branch-1",
+      requestedById: "cashier-1",
+      type: "SALE_CANCEL",
+      reason: "Prueba",
+      entityType,
+      entityId: "sale-1"
+    })).rejects.toThrow("AUTHORIZATION_ENTITY_TYPE_TOO_LONG");
+
+    const result = await postAuthorizationRequest({
+      organizationId: "org-1",
+      branchId: "branch-1",
+      requestedById: "cashier-1",
+      type: "SALE_CANCEL",
+      reason: "Prueba",
+      entityType,
+      entityId: "sale-1"
+    });
+
+    expect(result).toEqual({
+      status: 400,
+      body: { error: "AUTHORIZATION_ENTITY_TYPE_TOO_LONG" }
+    });
+    expect(db.user.findUnique).not.toHaveBeenCalled();
+    expect(db.authorizationRequest.create).not.toHaveBeenCalled();
+  });
 });
