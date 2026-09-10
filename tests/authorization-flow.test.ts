@@ -6,17 +6,12 @@ vi.mock("../src/lib/prisma", () => ({
     authorizationRequest: { create: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
     authorizationApproval: { create: vi.fn() },
     auditLog: { create: vi.fn() },
-    $transaction: vi.fn(async (callback: any) => callback({
-      user: { findUnique: vi.fn(async (args: any) => prisma.user.findUnique(args)) },
-      authorizationApproval: { create: vi.fn().mockResolvedValue({ id: "approval-1" }) },
-      authorizationRequest: { update: vi.fn().mockResolvedValue({ id: "request-1", status: "APPROVED" }) },
-      auditLog: { create: vi.fn().mockResolvedValue({ id: "audit-1" }) }
-    }))
+    $transaction: vi.fn()
   }
 }));
 
 import { prisma } from "../src/lib/prisma";
-import { requestAuthorization, resolveAuthorization } from "../src/core/authorization";
+import { authorizationIntegrityHash, requestAuthorization, resolveAuthorization } from "../src/core/authorization";
 
 const db = prisma as any;
 
@@ -41,17 +36,27 @@ const pendingRequest = {
   branchId: "branch-1",
   requestedById: "cashier-1",
   status: "PENDING",
+  type: "SALE_CANCEL",
+  reason: "Cancelación solicitada por cliente",
   entityType: "Sale",
   entityId: "sale-1",
   beforeData: { status: "COMPLETED" },
-  requestedData: { status: "CANCELLED" }
+  requestedData: { status: "CANCELLED" },
+  integrityHash: authorizationIntegrityHash({
+    organizationId: "org-1",
+    branchId: "branch-1",
+    requestedById: "cashier-1",
+    type: "SALE_CANCEL",
+    reason: "Cancelación solicitada por cliente",
+    entityType: "Sale",
+    entityId: "sale-1",
+    beforeData: { status: "COMPLETED" },
+    requestedData: { status: "CANCELLED" }
+  })
 };
 
 describe("complete authorization flow", () => {
   it("creates a scoped request and allows a manager to approve it with an audit entry", async () => {
-    // Resolve the fixture by requested user id instead of relying on mock call order.
-    // This keeps the test stable when requestAuthorization and resolveAuthorization
-    // evolve and both query prisma.user.findUnique independently.
     db.user.findUnique.mockImplementation(async ({ where }: any) => {
       if (where.id === "cashier-1") return requester;
       if (where.id === "manager-1") return approver("GERENTE");
@@ -59,6 +64,18 @@ describe("complete authorization flow", () => {
     });
     db.authorizationRequest.create.mockResolvedValue(pendingRequest);
     db.authorizationRequest.findUnique.mockResolvedValue(pendingRequest);
+    db.$transaction.mockImplementation(async (callback: any) => callback({
+      user: { findUnique: vi.fn(async ({ where }: any) => {
+        if (where.id === "manager-1") return approver("GERENTE");
+        return null;
+      }) },
+      authorizationRequest: {
+        findUnique: vi.fn().mockResolvedValue(pendingRequest),
+        update: vi.fn().mockResolvedValue({ id: "request-1", status: "APPROVED" })
+      },
+      authorizationApproval: { create: vi.fn().mockResolvedValue({ id: "approval-1", decision: "APPROVED" }) },
+      auditLog: { create: vi.fn().mockResolvedValue({ id: "audit-1" }) }
+    }));
 
     const created = await requestAuthorization({
       organizationId: "org-1",
