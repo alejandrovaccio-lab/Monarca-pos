@@ -61,7 +61,7 @@ export async function requestAuthorization(input: {
   const integrityHash = authorizationIntegrityHash(input);
   return prisma.authorizationRequest.create({ data: {
     organizationId: input.organizationId, branchId: input.branchId, requestedById: input.requestedById,
-    type: input.type as any, reason: input.reason, entityType: input.entityType, entityId: input.entityId,
+    type: input.type as any, reason: input.reason.trim(), entityType: input.entityType, entityId: input.entityId,
     beforeData: input.beforeData as any, requestedData: input.requestedData as any, integrityHash
   }});
 }
@@ -87,20 +87,43 @@ export async function resolveAuthorization(input: {
     if (currentApprover.organizationId !== request.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
     if (request.branchId && !currentApprover.branchAccess.some(({ branchId }) => branchId === request.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
+    const currentRequest = await tx.authorizationRequest.findUnique({ where: { id: request.id } });
+    if (!currentRequest) throw new Error("AUTHORIZATION_NOT_FOUND");
+    if (currentRequest.status !== "PENDING") throw new Error("AUTHORIZATION_ALREADY_RESOLVED");
+    if (currentRequest.requestedById === input.approverId) throw new Error("SELF_APPROVAL_NOT_ALLOWED");
+    if (currentRequest.organizationId !== request.organizationId || currentRequest.branchId !== request.branchId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+    if (currentRequest.type !== request.type || currentRequest.reason !== request.reason || currentRequest.entityType !== request.entityType || currentRequest.entityId !== request.entityId || currentRequest.requestedById !== request.requestedById) {
+      throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    }
+    const expectedIntegrityHash = authorizationIntegrityHash({
+      organizationId: currentRequest.organizationId,
+      branchId: currentRequest.branchId ?? undefined,
+      requestedById: currentRequest.requestedById,
+      type: currentRequest.type,
+      reason: currentRequest.reason,
+      entityType: currentRequest.entityType,
+      entityId: currentRequest.entityId ?? undefined,
+      beforeData: currentRequest.beforeData,
+      requestedData: currentRequest.requestedData
+    });
+    if (currentRequest.integrityHash !== expectedIntegrityHash || currentRequest.integrityHash !== request.integrityHash) {
+      throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    }
+
     let claimed;
     try {
-      claimed = await tx.authorizationRequest.update({ where: { id: request.id, status: "PENDING" }, data: { status: input.decision, resolvedAt: new Date() } });
+      claimed = await tx.authorizationRequest.update({ where: { id: currentRequest.id, status: "PENDING" }, data: { status: input.decision, resolvedAt: new Date() } });
     } catch (error: any) {
       if (error?.code === "P2025") throw new Error("AUTHORIZATION_ALREADY_RESOLVED");
       throw error;
     }
 
-    const approval = await tx.authorizationApproval.create({ data: { authorizationRequestId: request.id, approverId: input.approverId, decision: input.decision, notes: input.notes } });
+    const approval = await tx.authorizationApproval.create({ data: { authorizationRequestId: currentRequest.id, approverId: input.approverId, decision: input.decision, notes: input.notes } });
     await tx.auditLog.create({ data: {
-      organizationId: request.organizationId, branchId: request.branchId, userId: input.approverId,
-      action: `AUTHORIZATION_${input.decision}`, entityType: request.entityType, entityId: request.entityId,
-      beforeData: request.beforeData == null ? undefined : request.beforeData,
-      afterData: request.requestedData == null ? undefined : request.requestedData
+      organizationId: currentRequest.organizationId, branchId: currentRequest.branchId, userId: input.approverId,
+      action: `AUTHORIZATION_${input.decision}`, entityType: currentRequest.entityType, entityId: currentRequest.entityId,
+      beforeData: currentRequest.beforeData == null ? undefined : currentRequest.beforeData,
+      afterData: currentRequest.requestedData == null ? undefined : currentRequest.requestedData
     }});
     return { approval, request: claimed };
   });
