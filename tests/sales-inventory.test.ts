@@ -82,8 +82,62 @@ describe("authorized sale inventory restoration", () => {
       create: { branchId: "branch-1", productId: "product-2", quantity: 0.5 },
       update: { quantity: { increment: 0.5 } },
     });
-    expect(movement).toHaveBeenCalledTimes(2);
+    expect(movement).toHaveBeenTimes(2);
     expect(audit).toHaveBeenCalledOnce();
+  });
+
+  it("restores inventory through the approved refund path", async () => {
+    const refundAuthorization = {
+      ...authorization,
+      type: "SALE_REFUND",
+      reason: "Cliente solicita devolución",
+      requestedData: { id: "sale-1", status: "REFUNDED" },
+    };
+    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    db.authorizationRequest.findUnique.mockResolvedValue(refundAuthorization);
+
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const upsert = vi.fn().mockResolvedValue({});
+    const movement = vi.fn().mockResolvedValue({});
+    const audit = vi.fn().mockResolvedValue({});
+    const queryRaw = vi.fn().mockResolvedValue([]);
+    db.$transaction.mockImplementation(async (callback: any) => callback({
+      $queryRaw: queryRaw,
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(refundAuthorization) },
+      sale: { findUnique: vi.fn().mockResolvedValue(sale), updateMany },
+      inventoryBalance: { upsert },
+      inventoryMovement: { create: movement },
+      auditLog: { create: audit },
+    }));
+
+    const result = await executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" });
+
+    expect(result.status).toBe("REFUNDED");
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: "sale-1", status: "COMPLETED" },
+      data: { status: "REFUNDED" },
+    });
+    expect(upsert).toHaveBeenCalledTimes(2);
+    expect(movement).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      referenceType: "SALE_REFUND",
+      referenceId: "sale-1",
+      quantity: 2,
+      unitCost: 10,
+    }));
+    expect(movement).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      referenceType: "SALE_REFUND",
+      referenceId: "sale-1",
+      quantity: 0.5,
+      unitCost: 20,
+    }));
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: "SALE_REFUNDED",
+        entityType: "Sale",
+        entityId: "sale-1",
+      }),
+    }));
   });
 
   it("does not execute an unapproved request", async () => {
