@@ -76,9 +76,7 @@ describe("authorization request integrity", () => {
       type: "SALE_REFUND",
       reason: "Reembolso autorizado",
       entityType: "Sale",
-      entityId: "sale-1",
-      beforeData: undefined,
-      requestedData: undefined
+      entityId: "sale-1"
     });
     const rawInputHash = authorizationIntegrityHash({
       organizationId: "org-1",
@@ -87,9 +85,7 @@ describe("authorization request integrity", () => {
       type: "SALE_REFUND",
       reason: "  Reembolso autorizado  ",
       entityType: "Sale",
-      entityId: "sale-1",
-      beforeData: undefined,
-      requestedData: undefined
+      entityId: "sale-1"
     });
 
     expect(call.data.integrityHash).toBe(persistedHash);
