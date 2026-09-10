@@ -11,6 +11,8 @@ export const AUTHORIZATION_TYPES = new Set([
 
 const MAX_AUTHORIZATION_REASON_LENGTH = 1000;
 const MAX_AUTHORIZATION_NOTES_LENGTH = 2000;
+const MAX_AUTHORIZATION_IDENTIFIER_LENGTH = 128;
+const MAX_AUTHORIZATION_ENTITY_TYPE_LENGTH = 64;
 
 function canonicalize(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -33,6 +35,10 @@ export function authorizationIntegrityHash(input: {
   return createHash("sha256").update(canonicalize(input)).digest("hex");
 }
 
+function assertIdentifier(value: string | undefined, errorCode: string) {
+  if (!value || value.length > MAX_AUTHORIZATION_IDENTIFIER_LENGTH) throw new Error(errorCode);
+}
+
 export async function hasPermission(userId: string, permissionCode: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -53,20 +59,27 @@ export async function requestAuthorization(input: {
   entityType: string; entityId?: string; beforeData?: unknown; requestedData?: unknown;
 }) {
   if (!AUTHORIZATION_TYPES.has(input.type)) throw new Error("AUTHORIZATION_TYPE_INVALID");
+  assertIdentifier(input.organizationId, "AUTHORIZATION_ORGANIZATION_INVALID");
+  assertIdentifier(input.branchId, "AUTHORIZATION_BRANCH_INVALID");
+  assertIdentifier(input.requestedById, "AUTHORIZATION_REQUESTER_INVALID");
+  assertIdentifier(input.entityId, "AUTHORIZATION_ENTITY_ID_INVALID");
+  const entityType = input.entityType?.trim() ?? "";
+  if (!entityType) throw new Error("AUTHORIZATION_ENTITY_REQUIRED");
+  if (entityType.length > MAX_AUTHORIZATION_ENTITY_TYPE_LENGTH) throw new Error("AUTHORIZATION_ENTITY_TYPE_TOO_LONG");
+
   const persistedReason = input.reason?.trim() ?? "";
   if (!persistedReason) throw new Error("AUTHORIZATION_REASON_REQUIRED");
   if (persistedReason.length > MAX_AUTHORIZATION_REASON_LENGTH) throw new Error("AUTHORIZATION_REASON_TOO_LONG");
-  if (!input.entityType?.trim()) throw new Error("AUTHORIZATION_ENTITY_REQUIRED");
 
   const requester = await prisma.user.findUnique({ where: { id: input.requestedById }, include: { branchAccess: true } });
   if (!requester || requester.status === "INACTIVE") throw new Error("AUTHORIZATION_REQUESTER_REQUIRED");
   if (requester.organizationId !== input.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
   if (input.branchId && !requester.branchAccess.some(({ branchId }) => branchId === input.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
-  const integrityHash = authorizationIntegrityHash({ ...input, reason: persistedReason });
+  const integrityHash = authorizationIntegrityHash({ ...input, reason: persistedReason, entityType });
   return prisma.authorizationRequest.create({ data: {
     organizationId: input.organizationId, branchId: input.branchId, requestedById: input.requestedById,
-    type: input.type as any, reason: persistedReason, entityType: input.entityType, entityId: input.entityId,
+    type: input.type as any, reason: persistedReason, entityType, entityId: input.entityId,
     beforeData: input.beforeData as any, requestedData: input.requestedData as any, integrityHash
   }});
 }
@@ -75,6 +88,8 @@ export async function resolveAuthorization(input: {
   requestId: string; approverId: string; decision: "APPROVED" | "REJECTED"; notes?: string;
 }) {
   if (input.decision !== "APPROVED" && input.decision !== "REJECTED") throw new Error("AUTHORIZATION_DECISION_INVALID");
+  assertIdentifier(input.requestId, "AUTHORIZATION_REQUEST_ID_INVALID");
+  assertIdentifier(input.approverId, "AUTHORIZATION_APPROVER_ID_INVALID");
   const notes = input.notes?.trim();
   if (notes && notes.length > MAX_AUTHORIZATION_NOTES_LENGTH) throw new Error("AUTHORIZATION_NOTES_TOO_LONG");
 
@@ -113,9 +128,6 @@ export async function resolveAuthorization(input: {
       beforeData: currentRequest.beforeData,
       requestedData: currentRequest.requestedData
     });
-    // The migration intentionally keeps integrityHash nullable so legacy requests
-    // can still be resolved. Any request that already carries a hash must pass the
-    // full integrity check, and all newly created requests receive a hash.
     if (currentRequest.integrityHash || request.integrityHash) {
       if (currentRequest.integrityHash !== expectedIntegrityHash || currentRequest.integrityHash !== request.integrityHash) {
         throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
