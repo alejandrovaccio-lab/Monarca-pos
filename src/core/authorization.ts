@@ -36,7 +36,7 @@ export function authorizationIntegrityHash(input: {
 }
 
 function assertIdentifier(value: string | undefined, errorCode: string) {
-  if (!value || value.length > MAX_AUTHORIZATION_IDENTIFIER_LENGTH) throw new Error(errorCode);
+  if (value !== undefined && (!value || value.length > MAX_AUTHORIZATION_IDENTIFIER_LENGTH)) throw new Error(errorCode);
 }
 
 export async function hasPermission(userId: string, permissionCode: string) {
@@ -60,9 +60,9 @@ export async function requestAuthorization(input: {
 }) {
   if (!AUTHORIZATION_TYPES.has(input.type)) throw new Error("AUTHORIZATION_TYPE_INVALID");
   assertIdentifier(input.organizationId, "AUTHORIZATION_ORGANIZATION_INVALID");
-  assertIdentifier(input.branchId, "AUTHORIZATION_BRANCH_INVALID");
+  if (input.branchId !== undefined) assertIdentifier(input.branchId, "AUTHORIZATION_BRANCH_INVALID");
   assertIdentifier(input.requestedById, "AUTHORIZATION_REQUESTER_INVALID");
-  assertIdentifier(input.entityId, "AUTHORIZATION_ENTITY_ID_INVALID");
+  if (input.entityId !== undefined) assertIdentifier(input.entityId, "AUTHORIZATION_ENTITY_ID_INVALID");
   const entityType = input.entityType?.trim() ?? "";
   if (!entityType) throw new Error("AUTHORIZATION_ENTITY_REQUIRED");
   if (entityType.length > MAX_AUTHORIZATION_ENTITY_TYPE_LENGTH) throw new Error("AUTHORIZATION_ENTITY_TYPE_TOO_LONG");
