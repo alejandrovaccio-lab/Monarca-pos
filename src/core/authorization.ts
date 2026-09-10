@@ -9,6 +9,9 @@ export const AUTHORIZATION_TYPES = new Set([
   "REGISTER_EXCEPTION", "ACCESS_CHANGE", "ORDER_ADJUSTMENT", "OTHER"
 ]);
 
+const MAX_AUTHORIZATION_REASON_LENGTH = 1000;
+const MAX_AUTHORIZATION_NOTES_LENGTH = 2000;
+
 function canonicalize(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
@@ -50,7 +53,9 @@ export async function requestAuthorization(input: {
   entityType: string; entityId?: string; beforeData?: unknown; requestedData?: unknown;
 }) {
   if (!AUTHORIZATION_TYPES.has(input.type)) throw new Error("AUTHORIZATION_TYPE_INVALID");
-  if (!input.reason?.trim()) throw new Error("AUTHORIZATION_REASON_REQUIRED");
+  const persistedReason = input.reason?.trim() ?? "";
+  if (!persistedReason) throw new Error("AUTHORIZATION_REASON_REQUIRED");
+  if (persistedReason.length > MAX_AUTHORIZATION_REASON_LENGTH) throw new Error("AUTHORIZATION_REASON_TOO_LONG");
   if (!input.entityType?.trim()) throw new Error("AUTHORIZATION_ENTITY_REQUIRED");
 
   const requester = await prisma.user.findUnique({ where: { id: input.requestedById }, include: { branchAccess: true } });
@@ -58,7 +63,6 @@ export async function requestAuthorization(input: {
   if (requester.organizationId !== input.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
   if (input.branchId && !requester.branchAccess.some(({ branchId }) => branchId === input.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
-  const persistedReason = input.reason.trim();
   const integrityHash = authorizationIntegrityHash({ ...input, reason: persistedReason });
   return prisma.authorizationRequest.create({ data: {
     organizationId: input.organizationId, branchId: input.branchId, requestedById: input.requestedById,
@@ -71,6 +75,8 @@ export async function resolveAuthorization(input: {
   requestId: string; approverId: string; decision: "APPROVED" | "REJECTED"; notes?: string;
 }) {
   if (input.decision !== "APPROVED" && input.decision !== "REJECTED") throw new Error("AUTHORIZATION_DECISION_INVALID");
+  const notes = input.notes?.trim();
+  if (notes && notes.length > MAX_AUTHORIZATION_NOTES_LENGTH) throw new Error("AUTHORIZATION_NOTES_TOO_LONG");
 
   const approver = await prisma.user.findUnique({ where: { id: input.approverId }, include: { roles: { include: { role: true } }, branchAccess: true } });
   if (!approver || approver.status === "INACTIVE" || !approver.roles.some(({ role }) => APPROVER_ROLES.has(role.name))) throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
@@ -124,7 +130,7 @@ export async function resolveAuthorization(input: {
       throw error;
     }
 
-    const approval = await tx.authorizationApproval.create({ data: { authorizationRequestId: currentRequest.id, approverId: input.approverId, decision: input.decision, notes: input.notes } });
+    const approval = await tx.authorizationApproval.create({ data: { authorizationRequestId: currentRequest.id, approverId: input.approverId, decision: input.decision, notes } });
     await tx.auditLog.create({ data: {
       organizationId: currentRequest.organizationId, branchId: currentRequest.branchId, userId: input.approverId,
       action: `AUTHORIZATION_${input.decision}`, entityType: currentRequest.entityType, entityId: currentRequest.entityId,
