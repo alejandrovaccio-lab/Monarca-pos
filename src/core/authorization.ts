@@ -58,10 +58,11 @@ export async function requestAuthorization(input: {
   if (requester.organizationId !== input.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
   if (input.branchId && !requester.branchAccess.some(({ branchId }) => branchId === input.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
-  const integrityHash = authorizationIntegrityHash(input);
+  const persistedReason = input.reason.trim();
+  const integrityHash = authorizationIntegrityHash({ ...input, reason: persistedReason });
   return prisma.authorizationRequest.create({ data: {
     organizationId: input.organizationId, branchId: input.branchId, requestedById: input.requestedById,
-    type: input.type as any, reason: input.reason.trim(), entityType: input.entityType, entityId: input.entityId,
+    type: input.type as any, reason: persistedReason, entityType: input.entityType, entityId: input.entityId,
     beforeData: input.beforeData as any, requestedData: input.requestedData as any, integrityHash
   }});
 }
