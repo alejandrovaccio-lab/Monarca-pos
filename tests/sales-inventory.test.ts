@@ -119,18 +119,22 @@ describe("authorized sale inventory restoration", () => {
       data: { status: "REFUNDED" },
     });
     expect(upsert).toHaveBeenCalledTimes(2);
-    expect(movement).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      referenceType: "SALE_REFUND",
-      referenceId: "sale-1",
-      quantity: 2,
-      unitCost: 10,
-    }));
-    expect(movement).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      referenceType: "SALE_REFUND",
-      referenceId: "sale-1",
-      quantity: 0.5,
-      unitCost: 20,
-    }));
+    expect(movement).toHaveBeenNthCalledWith(1, {
+      data: expect.objectContaining({
+        referenceType: "SALE_REFUND",
+        referenceId: "sale-1",
+        quantity: 2,
+        unitCost: 10,
+      }),
+    });
+    expect(movement).toHaveBeenNthCalledWith(2, {
+      data: expect.objectContaining({
+        referenceType: "SALE_REFUND",
+        referenceId: "sale-1",
+        quantity: 0.5,
+        unitCost: 20,
+      }),
+    });
     expect(audit).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         action: "SALE_REFUNDED",
