@@ -82,7 +82,7 @@ describe("authorized sale inventory restoration", () => {
       create: { branchId: "branch-1", productId: "product-2", quantity: 0.5 },
       update: { quantity: { increment: 0.5 } },
     });
-    expect(movement).toHaveBeenTimes(2);
+    expect(movement).toHaveBeenCalledTimes(2);
     expect(audit).toHaveBeenCalledOnce();
   });
 
