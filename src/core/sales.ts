@@ -52,13 +52,10 @@ export async function executeApprovedSaleChange(input: {
   if (authorization.entityType !== "Sale" || !authorization.entityId) throw new Error("AUTHORIZATION_ENTITY_INVALID");
 
   const expectedStatus = TARGET_STATUS[authorization.type];
-  // Integrity must be checked before validating the mutable target payload so tampering
-  // with an authorization is classified as an integrity violation, not a target error.
   assertSaleAuthorizationIntegrity(authorization);
   assertSaleAuthorizationPayload(authorization, expectedStatus);
 
   return prisma.$transaction(async (tx) => {
-    // Serialize execution of the authorization so the same approved request cannot be consumed twice concurrently.
     await tx.$queryRaw`SELECT "id" FROM "AuthorizationRequest" WHERE "id" = ${authorization.id} FOR UPDATE`;
 
     const currentAuthorization = await tx.authorizationRequest.findUnique({ where: { id: authorization.id } });
@@ -70,6 +67,12 @@ export async function executeApprovedSaleChange(input: {
     if (currentAuthorization.type !== authorization.type || currentAuthorization.reason !== authorization.reason || currentAuthorization.requestedById !== authorization.requestedById) {
       throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     }
+
+    const currentExecutor = await tx.user.findUnique({
+      where: { id: input.executorId },
+      include: { roles: { include: { role: true } }, branchAccess: true },
+    });
+    assertSaleAuthorizationExecutorScope(currentExecutor, currentAuthorization);
 
     assertSaleAuthorizationIntegrity(currentAuthorization);
     if (authorization.integrityHash && currentAuthorization.integrityHash !== authorization.integrityHash) {
@@ -92,7 +95,6 @@ export async function executeApprovedSaleChange(input: {
 
     const status = targetStatusFor(currentAuthorization.type);
 
-    // Conditional update makes execution single-use even under concurrent requests.
     const changed = await tx.sale.updateMany({
       where: { id: sale.id, status: "COMPLETED" },
       data: { status },
@@ -146,6 +148,20 @@ export async function executeApprovedSaleChange(input: {
 
     return { ...sale, status };
   });
+}
+
+function assertSaleAuthorizationExecutorScope(
+  executor: { id: string; organizationId: string; status: string; roles: Array<{ role: { name: string } }>; branchAccess: Array<{ branchId: string }> } | null,
+  authorization: { organizationId: string; branchId: string | null },
+) {
+  if (!executor || executor.status === "INACTIVE") throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
+  if (!executor.roles.some(({ role }) => ["ENCARGADO_TIENDA", "GERENTE", "ADMIN", "SUPER_ADMIN"].includes(role.name))) {
+    throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
+  }
+  if (executor.organizationId !== authorization.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+  if (authorization.branchId && !executor.branchAccess.some(({ branchId }) => branchId === authorization.branchId)) {
+    throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+  }
 }
 
 function assertSaleAuthorizationPayload(authorization: {
