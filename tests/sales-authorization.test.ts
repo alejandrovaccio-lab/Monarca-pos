@@ -9,6 +9,7 @@ vi.mock("../src/lib/prisma", () => ({
     auditLog: { create: vi.fn() },
     $transaction: vi.fn(async (callback: any) => callback({
       $queryRaw: vi.fn(),
+      user: { findUnique: vi.fn() },
       authorizationRequest: { findUnique: vi.fn() },
       sale: {
         findUnique: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "COMPLETED", items: [] }),
@@ -88,6 +89,7 @@ describe("sale authorization enforcement", () => {
     db.authorizationRequest.findUnique.mockResolvedValue(request);
     db.$transaction.mockImplementationOnce(async (callback: any) => callback({
       $queryRaw: vi.fn(),
+      user: { findUnique: vi.fn().mockResolvedValue({ id: "manager-1", organizationId: "org-1", status: "ACTIVE", roles: [{ role: { name: "GERENTE" } }], branchAccess: [{ branchId: "branch-1" }] }) },
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(request) },
       sale: {
         findUnique: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "COMPLETED", items: [] }),
@@ -116,6 +118,7 @@ describe("sale authorization enforcement", () => {
     db.authorizationRequest.findUnique.mockResolvedValue(request);
     db.$transaction.mockImplementationOnce(async (callback: any) => callback({
       $queryRaw: vi.fn(),
+      user: { findUnique: vi.fn().mockResolvedValue({ id: "manager-2", organizationId: "org-1", status: "ACTIVE", roles: [{ role: { name: "ENCARGADO_TIENDA" } }], branchAccess: [{ branchId: "branch-1" }] }) },
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(request) },
       sale: {
         findUnique: vi.fn().mockResolvedValue({ id: "sale-1", branchId: "branch-1", status: "COMPLETED", items: [] }),
@@ -181,6 +184,7 @@ describe("sale authorization enforcement", () => {
     const currentAuthorization = { ...request, organizationId: "org-2" };
     db.$transaction.mockImplementationOnce(async (callback: any) => callback({
       $queryRaw: vi.fn(),
+      user: { findUnique: vi.fn().mockResolvedValue({ id: "manager-1", organizationId: "org-1", status: "ACTIVE", roles: [{ role: { name: "GERENTE" } }], branchAccess: [{ branchId: "branch-1" }] }) },
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(currentAuthorization) },
       sale: { findUnique: vi.fn(), updateMany: vi.fn() },
       inventoryBalance: { upsert: vi.fn() },
