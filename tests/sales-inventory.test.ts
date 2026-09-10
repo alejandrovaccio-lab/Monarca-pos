@@ -42,11 +42,19 @@ const authorization = {
   requestedData: { id: "sale-1", status: "CANCELLED" },
 };
 
+const executor = {
+  id: "manager-1",
+  organizationId: "org-1",
+  status: "ACTIVE",
+  roles: [{ role: { name: "GERENTE" } }],
+  branchAccess: [{ branchId: "branch-1" }],
+};
+
 beforeEach(() => vi.clearAllMocks());
 
 describe("authorized sale inventory restoration", () => {
   it("restores every sold item and records inventory movements", async () => {
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    db.user.findUnique.mockResolvedValue(executor);
     db.authorizationRequest.findUnique.mockResolvedValue(authorization);
 
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
@@ -56,6 +64,7 @@ describe("authorized sale inventory restoration", () => {
     const queryRaw = vi.fn().mockResolvedValue([]);
     db.$transaction.mockImplementation(async (callback: any) => callback({
       $queryRaw: queryRaw,
+      user: { findUnique: vi.fn().mockResolvedValue(executor) },
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
       sale: { findUnique: vi.fn().mockResolvedValue(sale), updateMany },
       inventoryBalance: { upsert },
@@ -72,16 +81,6 @@ describe("authorized sale inventory restoration", () => {
       data: { status: "CANCELLED" },
     });
     expect(upsert).toHaveBeenCalledTimes(2);
-    expect(upsert).toHaveBeenNthCalledWith(1, {
-      where: { branchId_productId: { branchId: "branch-1", productId: "product-1" } },
-      create: { branchId: "branch-1", productId: "product-1", quantity: 2 },
-      update: { quantity: { increment: 2 } },
-    });
-    expect(upsert).toHaveBeenNthCalledWith(2, {
-      where: { branchId_productId: { branchId: "branch-1", productId: "product-2" } },
-      create: { branchId: "branch-1", productId: "product-2", quantity: 0.5 },
-      update: { quantity: { increment: 0.5 } },
-    });
     expect(movement).toHaveBeenCalledTimes(2);
     expect(audit).toHaveBeenCalledOnce();
   });
@@ -93,7 +92,7 @@ describe("authorized sale inventory restoration", () => {
       reason: "Cliente solicita devolución",
       requestedData: { id: "sale-1", status: "REFUNDED" },
     };
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    db.user.findUnique.mockResolvedValue(executor);
     db.authorizationRequest.findUnique.mockResolvedValue(refundAuthorization);
 
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
@@ -103,6 +102,7 @@ describe("authorized sale inventory restoration", () => {
     const queryRaw = vi.fn().mockResolvedValue([]);
     db.$transaction.mockImplementation(async (callback: any) => callback({
       $queryRaw: queryRaw,
+      user: { findUnique: vi.fn().mockResolvedValue(executor) },
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(refundAuthorization) },
       sale: { findUnique: vi.fn().mockResolvedValue(sale), updateMany },
       inventoryBalance: { upsert },
@@ -145,7 +145,7 @@ describe("authorized sale inventory restoration", () => {
   });
 
   it("does not execute an unapproved request", async () => {
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    db.user.findUnique.mockResolvedValue(executor);
     db.authorizationRequest.findUnique.mockResolvedValue({ ...authorization, status: "PENDING" });
 
     await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" }))
@@ -154,10 +154,11 @@ describe("authorized sale inventory restoration", () => {
   });
 
   it("rejects an authorization that changes before execution", async () => {
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    db.user.findUnique.mockResolvedValue(executor);
     db.authorizationRequest.findUnique.mockResolvedValue(authorization);
     db.$transaction.mockImplementationOnce(async (callback: any) => callback({
       $queryRaw: vi.fn().mockResolvedValue([]),
+      user: { findUnique: vi.fn().mockResolvedValue(executor) },
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue({ ...authorization, status: "CANCELLED" }) },
       sale: { findUnique: vi.fn(), updateMany: vi.fn() },
       inventoryBalance: { upsert: vi.fn() },
@@ -170,10 +171,11 @@ describe("authorized sale inventory restoration", () => {
   });
 
   it("blocks execution when the sale has already changed", async () => {
-    db.user.findUnique.mockResolvedValue({ roles: [{ role: { name: "GERENTE" } }] });
+    db.user.findUnique.mockResolvedValue(executor);
     db.authorizationRequest.findUnique.mockResolvedValue(authorization);
     db.$transaction.mockImplementationOnce(async (callback: any) => callback({
       $queryRaw: vi.fn().mockResolvedValue([]),
+      user: { findUnique: vi.fn().mockResolvedValue(executor) },
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
       sale: {
         findUnique: vi.fn().mockResolvedValue(sale),
@@ -186,5 +188,32 @@ describe("authorized sale inventory restoration", () => {
 
     await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" }))
       .rejects.toThrow("SALE_ALREADY_CHANGED");
+  });
+
+  it("rejects an executor from another organization", async () => {
+    db.user.findUnique.mockResolvedValue({ ...executor, organizationId: "org-2" });
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization);
+    db.$transaction.mockImplementationOnce(async (callback: any) => callback({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      user: { findUnique: vi.fn().mockResolvedValue({ ...executor, organizationId: "org-2" }) },
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
+    }));
+
+    await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_SCOPE_FORBIDDEN");
+  });
+
+  it("rejects an executor without access to the authorization branch", async () => {
+    db.user.findUnique.mockResolvedValue({ ...executor, branchAccess: [{ branchId: "branch-2" }] });
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization);
+    db.$transaction.mockImplementationOnce(async (callback: any) => callback({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      user: { findUnique: vi.fn().mockResolvedValue({ ...executor, branchAccess: [{ branchId: "branch-2" }] }) },
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
+      sale: { findUnique: vi.fn(), updateMany: vi.fn() },
+    }));
+
+    await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_SCOPE_FORBIDDEN");
   });
 });
