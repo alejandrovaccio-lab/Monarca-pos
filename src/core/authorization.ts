@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { prisma } from "../lib/prisma";
 
 export const APPROVER_ROLES = new Set(["ENCARGADO_TIENDA", "GERENTE", "ADMIN", "SUPER_ADMIN"]);
+export const CRITICAL_APPROVER_ROLES = new Set(["ADMIN", "SUPER_ADMIN"]);
 
 export const AUTHORIZATION_TYPES = new Set([
   "PRICE_CHANGE", "MARGIN_CHANGE", "DISCOUNT_EXCEPTION", "SALE_CANCEL", "SALE_REFUND",
@@ -39,6 +40,21 @@ function assertIdentifier(value: string | undefined, errorCode: string) {
   if (value !== undefined && (!value || value.length > MAX_AUTHORIZATION_IDENTIFIER_LENGTH)) throw new Error(errorCode);
 }
 
+function requiresCriticalApprover(type: string) {
+  return type === "TAX_CHANGE" || type === "ACCESS_CHANGE";
+}
+
+function hasApproverRole(user: { roles: Array<{ role: { name: string } }> }, roles: Set<string>) {
+  return user.roles.some(({ role }) => roles.has(role.name));
+}
+
+function assertApproverForType(user: { roles: Array<{ role: { name: string } }> }, type: string) {
+  if (!hasApproverRole(user, APPROVER_ROLES)) throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
+  if (requiresCriticalApprover(type) && !hasApproverRole(user, CRITICAL_APPROVER_ROLES)) {
+    throw new Error("AUTHORIZATION_CRITICAL_APPROVER_REQUIRED");
+  }
+}
+
 export async function hasPermission(userId: string, permissionCode: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -51,7 +67,7 @@ export async function hasPermission(userId: string, permissionCode: string) {
 export async function canApproveAuthorization(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId }, include: { roles: { include: { role: true } } } });
   if (!user || user.status === "INACTIVE") return false;
-  return user.roles.some(({ role }) => APPROVER_ROLES.has(role.name));
+  return hasApproverRole(user, APPROVER_ROLES);
 }
 
 export async function requestAuthorization(input: {
@@ -94,18 +110,19 @@ export async function resolveAuthorization(input: {
   if (notes && notes.length > MAX_AUTHORIZATION_NOTES_LENGTH) throw new Error("AUTHORIZATION_NOTES_TOO_LONG");
 
   const approver = await prisma.user.findUnique({ where: { id: input.approverId }, include: { roles: { include: { role: true } }, branchAccess: true } });
-  if (!approver || approver.status === "INACTIVE" || !approver.roles.some(({ role }) => APPROVER_ROLES.has(role.name))) throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
+  if (!approver || approver.status === "INACTIVE") throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
 
   const request = await prisma.authorizationRequest.findUnique({ where: { id: input.requestId } });
   if (!request) throw new Error("AUTHORIZATION_NOT_FOUND");
   if (request.requestedById === input.approverId) throw new Error("SELF_APPROVAL_NOT_ALLOWED");
   if (request.status !== "PENDING") throw new Error("AUTHORIZATION_ALREADY_RESOLVED");
+  assertApproverForType(approver, request.type);
   if (approver.organizationId !== request.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
   if (request.branchId && !approver.branchAccess.some(({ branchId }) => branchId === request.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
   return prisma.$transaction(async (tx) => {
     const currentApprover = await tx.user.findUnique({ where: { id: input.approverId }, include: { roles: { include: { role: true } }, branchAccess: true } });
-    if (!currentApprover || currentApprover.status === "INACTIVE" || !currentApprover.roles.some(({ role }) => APPROVER_ROLES.has(role.name))) throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
+    if (!currentApprover || currentApprover.status === "INACTIVE") throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
     if (currentApprover.organizationId !== request.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
     if (request.branchId && !currentApprover.branchAccess.some(({ branchId }) => branchId === request.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
@@ -117,6 +134,7 @@ export async function resolveAuthorization(input: {
     if (currentRequest.type !== request.type || currentRequest.reason !== request.reason || currentRequest.entityType !== request.entityType || currentRequest.entityId !== request.entityId || currentRequest.requestedById !== request.requestedById) {
       throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     }
+    assertApproverForType(currentApprover, currentRequest.type);
     const expectedIntegrityHash = authorizationIntegrityHash({
       organizationId: currentRequest.organizationId,
       branchId: currentRequest.branchId ?? undefined,
