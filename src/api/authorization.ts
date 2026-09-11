@@ -38,7 +38,15 @@ function authorizationError(error: unknown) {
   return { status, body: { error: code } };
 }
 
+function isRequestBodyObject(input: unknown): input is Record<string, unknown> {
+  return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
 export async function postAuthorizationRequest(input: Parameters<typeof requestAuthorization>[0]) {
+  if (!isRequestBodyObject(input)) {
+    return { status: 400, body: { error: "INVALID_REQUEST" } };
+  }
+
   try {
     const request = await requestAuthorization(input);
     return { status: 201, body: request };
@@ -48,6 +56,10 @@ export async function postAuthorizationRequest(input: Parameters<typeof requestA
 }
 
 export async function postAuthorizationDecision(input: Parameters<typeof resolveAuthorization>[0]) {
+  if (!isRequestBodyObject(input)) {
+    return { status: 400, body: { error: "INVALID_REQUEST" } };
+  }
+
   try {
     const result = await resolveAuthorization(input);
     return { status: 200, body: result };
