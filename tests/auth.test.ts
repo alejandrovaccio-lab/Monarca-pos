@@ -26,13 +26,24 @@ beforeEach(() => {
   db.userSession.update.mockResolvedValue({ id: "session-1", revokedAt: new Date() });
 });
 
-const activeUser = (branches: Array<{ id: string; name: string; code: string; timezone: string }>) => ({
+const activeUser = (
+  branches: Array<{
+    id: string;
+    name: string;
+    code: string;
+    timezone: string;
+    organizationId?: string;
+  }>
+) => ({
   id: "user-1",
   name: "Colaborador Prueba",
   email: "test@monarca.mx",
   status: "ACTIVE",
+  organizationId: "org-1",
   roles: [{ role: { name: "CAJERO" } }],
-  branchAccess: branches.map((branch) => ({ branch }))
+  branchAccess: branches.map((branch) => ({
+    branch: { organizationId: "org-1", ...branch }
+  }))
 });
 
 describe("authentication", () => {
@@ -68,6 +79,29 @@ describe("authentication", () => {
     db.authCredential.findUnique.mockResolvedValue({ passwordHash: "hash" });
 
     const result = await login("test@monarca.mx", "correct-password", "branch-999");
+
+    expect(result).toMatchObject({ ok: false, reason: "BRANCH_ACCESS_DENIED" });
+    expect(db.userSession.create).not.toHaveBeenCalled();
+  });
+
+  it("filters branch access that belongs to another organization", async () => {
+    const sameOrgBranch = {
+      id: "branch-1",
+      name: "Centro",
+      code: "AGS-01",
+      timezone: "America/Mexico_City"
+    };
+    const foreignOrgBranch = {
+      id: "branch-foreign",
+      name: "Sucursal Externa",
+      code: "EXT-01",
+      timezone: "America/Mexico_City",
+      organizationId: "org-2"
+    };
+    db.user.findFirst.mockResolvedValue(activeUser([sameOrgBranch, foreignOrgBranch]));
+    db.authCredential.findUnique.mockResolvedValue({ passwordHash: "hash" });
+
+    const result = await login("test@monarca.mx", "correct-password", "branch-foreign");
 
     expect(result).toMatchObject({ ok: false, reason: "BRANCH_ACCESS_DENIED" });
     expect(db.userSession.create).not.toHaveBeenCalled();
