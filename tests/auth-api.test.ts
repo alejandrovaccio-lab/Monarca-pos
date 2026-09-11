@@ -73,6 +73,15 @@ describe("authentication API", () => {
     });
   });
 
+  it("maps a selected branch outside the user's access to HTTP 403", async () => {
+    mockedLogin.mockResolvedValue({ ok: false, reason: "BRANCH_ACCESS_DENIED" } as any);
+
+    await expect(postLogin({ email: "test@monarca.mx", password: "secret", branchId: "branch-9" })).resolves.toEqual({
+      status: 403,
+      body: { error: "BRANCH_ACCESS_DENIED", message: "You do not have access to this branch." }
+    });
+  });
+
   it("maps invalid credentials to HTTP 401", async () => {
     mockedLogin.mockResolvedValue({ ok: false, reason: "INVALID_CREDENTIALS" } as any);
 
