@@ -35,7 +35,9 @@ export async function postLogin(request: LoginRequest): Promise<ApiResponse<unkn
     const result = await login(request.email, request.password, request.branchId);
     if (!result.ok) {
       if (result.reason === "BRANCH_SELECTION_REQUIRED") return { status: 409, body: { error: result.reason, message: "Select a branch to continue.", branches: result.branches } };
-      if (result.reason === "NO_BRANCH_ACCESS") return { status: 403, body: { error: result.reason, message: "No branch access is assigned." } };
+      if (result.reason === "NO_BRANCH_ACCESS" || result.reason === "BRANCH_ACCESS_DENIED") {
+        return { status: 403, body: { error: result.reason, message: result.reason === "NO_BRANCH_ACCESS" ? "No branch access is assigned." : "You do not have access to this branch." } };
+      }
       return { status: 401, body: { error: "INVALID_CREDENTIALS", message: "Invalid credentials." } };
     }
     return { status: 200, body: { sessionId: result.sessionId, token: result.token, expiresAt: result.expiresAt, branch: result.branch, roles: result.roles } };
