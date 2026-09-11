@@ -33,12 +33,14 @@ export async function login(email: string, password: string, branchId?: string) 
   const user = await authenticate(email, password);
   if (!user) return { ok: false as const, reason: "INVALID_CREDENTIALS" as const };
 
-  const branches = user.branchAccess.map(({ branch }) => ({
-    id: branch.id,
-    name: branch.name,
-    code: branch.code,
-    timezone: branch.timezone
-  }));
+  const branches = user.branchAccess
+    .filter(({ branch }) => branch.organizationId === user.organizationId)
+    .map(({ branch }) => ({
+      id: branch.id,
+      name: branch.name,
+      code: branch.code,
+      timezone: branch.timezone
+    }));
 
   if (!branches.length) {
     return { ok: false as const, reason: "NO_BRANCH_ACCESS" as const };
