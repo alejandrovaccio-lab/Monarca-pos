@@ -19,7 +19,7 @@ function canonicalize(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
   const object = value as Record<string, unknown>;
-  return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(object[key])}`).join(",")}}`;
+  return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalize(object[key])}`).join(",`)}}`;
 }
 
 export function authorizationIntegrityHash(input: {
@@ -112,6 +112,9 @@ export async function resolveAuthorization(input: {
   const approver = await prisma.user.findUnique({ where: { id: input.approverId }, include: { roles: { include: { role: true } }, branchAccess: true } });
   if (!approver || approver.status === "INACTIVE") throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
 
+  // Establish the generic approval role boundary before revealing whether a request exists.
+  if (!hasApproverRole(approver, APPROVER_ROLES)) throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
+
   const request = await prisma.authorizationRequest.findUnique({ where: { id: input.requestId } });
   if (!request) throw new Error("AUTHORIZATION_NOT_FOUND");
   assertApproverForType(approver, request.type);
@@ -123,8 +126,9 @@ export async function resolveAuthorization(input: {
   return prisma.$transaction(async (tx) => {
     const currentApprover = await tx.user.findUnique({ where: { id: input.approverId }, include: { roles: { include: { role: true } }, branchAccess: true } });
     if (!currentApprover || currentApprover.status === "INACTIVE") throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
-    if (currentApprover.organizationId !== request.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+    if (!hasApproverRole(currentApprover, APPROVER_ROLES)) throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
     if (request.branchId && !currentApprover.branchAccess.some(({ branchId }) => branchId === request.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+    if (currentApprover.organizationId !== request.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
     const currentRequest = await tx.authorizationRequest.findUnique({ where: { id: request.id } });
     if (!currentRequest) throw new Error("AUTHORIZATION_NOT_FOUND");
