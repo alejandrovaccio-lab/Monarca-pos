@@ -22,11 +22,26 @@ beforeEach(() => {
 });
 
 describe("authentication API", () => {
-  it("rejects missing login fields without calling the core", async () => {
-    expect(await postLogin({ email: "", password: "" })).toMatchObject({
-      status: 400,
-      body: { error: "INVALID_REQUEST" }
-    });
+  it("rejects malformed login bodies before calling the core", async () => {
+    const invalidInputs = [null, undefined, [], "text", 123, true, { email: "test@monarca.mx", password: 123 }, { email: "test@monarca.mx", password: "secret", branchId: 123 }, { email: "   ", password: "secret" }];
+
+    for (const input of invalidInputs) {
+      const result = await postLogin(input as never);
+      expect(result).toMatchObject({ status: 400, body: { error: "INVALID_REQUEST" } });
+    }
+
+    expect(mockedLogin).not.toHaveBeenCalled();
+  });
+
+  it("rejects class instances as login bodies", async () => {
+    class LoginPayload {
+      email = "test@monarca.mx";
+      password = "secret";
+    }
+
+    const result = await postLogin(new LoginPayload() as never);
+
+    expect(result).toMatchObject({ status: 400, body: { error: "INVALID_REQUEST" } });
     expect(mockedLogin).not.toHaveBeenCalled();
   });
 
@@ -93,6 +108,13 @@ describe("authentication API", () => {
     expect(mockedLogout).not.toHaveBeenCalled();
   });
 
+  it("rejects non-string logout tokens before calling the core", async () => {
+    for (const token of [null, undefined, 123, {}, []]) {
+      await expect(postLogout(token as never)).resolves.toEqual({ status: 401, body: { error: "UNAUTHENTICATED" } });
+    }
+    expect(mockedLogout).not.toHaveBeenCalled();
+  });
+
   it("logs out a valid token and returns 204", async () => {
     mockedLogout.mockResolvedValue(undefined as any);
 
@@ -105,6 +127,13 @@ describe("authentication API", () => {
 
     await expect(getMe("bad-token")).resolves.toEqual({ status: 401, body: { error: "UNAUTHENTICATED" } });
     expect(mockedRequireSession).toHaveBeenCalledWith("bad-token");
+  });
+
+  it("rejects non-string getMe tokens before calling middleware", async () => {
+    for (const token of [null, undefined, 123, {}, []]) {
+      await expect(getMe(token as never)).resolves.toEqual({ status: 401, body: { error: "UNAUTHENTICATED" } });
+    }
+    expect(mockedRequireSession).not.toHaveBeenCalled();
   });
 
   it("returns only the intended authenticated user and branch fields", async () => {
