@@ -114,9 +114,9 @@ export async function resolveAuthorization(input: {
 
   const request = await prisma.authorizationRequest.findUnique({ where: { id: input.requestId } });
   if (!request) throw new Error("AUTHORIZATION_NOT_FOUND");
+  assertApproverForType(approver, request.type);
   if (request.requestedById === input.approverId) throw new Error("SELF_APPROVAL_NOT_ALLOWED");
   if (request.status !== "PENDING") throw new Error("AUTHORIZATION_ALREADY_RESOLVED");
-  assertApproverForType(approver, request.type);
   if (approver.organizationId !== request.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
   if (request.branchId && !approver.branchAccess.some(({ branchId }) => branchId === request.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
@@ -129,12 +129,12 @@ export async function resolveAuthorization(input: {
     const currentRequest = await tx.authorizationRequest.findUnique({ where: { id: request.id } });
     if (!currentRequest) throw new Error("AUTHORIZATION_NOT_FOUND");
     if (currentRequest.status !== "PENDING") throw new Error("AUTHORIZATION_ALREADY_RESOLVED");
+    assertApproverForType(currentApprover, currentRequest.type);
     if (currentRequest.requestedById === input.approverId) throw new Error("SELF_APPROVAL_NOT_ALLOWED");
     if (currentRequest.organizationId !== request.organizationId || currentRequest.branchId !== request.branchId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
     if (currentRequest.type !== request.type || currentRequest.reason !== request.reason || currentRequest.entityType !== request.entityType || currentRequest.entityId !== request.entityId || currentRequest.requestedById !== request.requestedById) {
       throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     }
-    assertApproverForType(currentApprover, currentRequest.type);
     const expectedIntegrityHash = authorizationIntegrityHash({
       organizationId: currentRequest.organizationId,
       branchId: currentRequest.branchId ?? undefined,
