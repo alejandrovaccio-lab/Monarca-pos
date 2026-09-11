@@ -8,7 +8,13 @@ export async function getSessionContext(sessionId: string) {
       branch: true
     }
   });
+
   if (!session || session.revokedAt || session.expiresAt <= new Date()) return null;
+  if (session.user.status !== "ACTIVE") return null;
+  if (!session.branchId || !session.branch) return null;
+  if (session.branch.organizationId !== session.user.organizationId) return null;
+  if (!session.user.branchAccess.some(({ branchId }) => branchId === session.branchId)) return null;
+
   return {
     sessionId: session.id,
     userId: session.userId,
