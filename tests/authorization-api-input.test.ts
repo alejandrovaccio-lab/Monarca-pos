@@ -1,7 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const requestAuthorization = vi.fn();
-const resolveAuthorization = vi.fn();
+const { requestAuthorization, resolveAuthorization } = vi.hoisted(() => ({
+  requestAuthorization: vi.fn(),
+  resolveAuthorization: vi.fn()
+}));
 
 vi.mock("../src/core/authorization", () => ({
   requestAuthorization,
@@ -11,6 +13,10 @@ vi.mock("../src/core/authorization", () => ({
 import { postAuthorizationRequest, postAuthorizationDecision } from "../src/api/authorization";
 
 describe("authorization API input boundary", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it.each([null, undefined, [], "text", 123, true])("rejects non-object request body: %p", async (input) => {
     const result = await postAuthorizationRequest(input as never);
 
