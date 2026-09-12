@@ -24,7 +24,7 @@ describe("authorization API boundary", () => {
 
   it("returns 200 for a successful authorization decision", async () => {
     mockedResolve.mockResolvedValue({ id: "auth-1", status: "APPROVED" } as any);
-    await expect(postAuthorizationDecision({} as any)).resolves.toEqual({
+    await expect(postAuthorizationDecision({ approverId: "user-1" } as any, "user-1")).resolves.toEqual({
       status: 200,
       body: { id: "auth-1", status: "APPROVED" }
     });
@@ -35,6 +35,7 @@ describe("authorization API boundary", () => {
     ["AUTHORIZATION_CRITICAL_APPROVER_REQUIRED", 403],
     ["AUTHORIZATION_REQUESTER_REQUIRED", 403],
     ["AUTHORIZATION_SCOPE_FORBIDDEN", 403],
+    ["AUTHORIZATION_APPROVER_MISMATCH", 403],
     ["SELF_APPROVAL_NOT_ALLOWED", 403],
     ["AUTHORIZATION_NOT_FOUND", 404],
     ["AUTHORIZATION_ALREADY_RESOLVED", 409],
@@ -71,7 +72,7 @@ describe("authorization API boundary", () => {
 
   it("does not leak unexpected internal error details from decision", async () => {
     mockedResolve.mockRejectedValue(new Error("PRISMA_INTERNAL_DETAIL"));
-    await expect(postAuthorizationDecision({} as any)).resolves.toEqual({
+    await expect(postAuthorizationDecision({ approverId: "user-1" } as any, "user-1")).resolves.toEqual({
       status: 500,
       body: { error: "INTERNAL_SERVER_ERROR" }
     });
