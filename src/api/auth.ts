@@ -4,6 +4,9 @@ import { requireSession } from "../middleware/auth";
 export type LoginRequest = { email: string; password: string; branchId?: string };
 export type ApiResponse<T> = { status: number; body: T };
 
+const MAX_AUTH_EMAIL_LENGTH = 254;
+const MAX_AUTH_PASSWORD_LENGTH = 256;
+const MAX_AUTH_BRANCH_ID_LENGTH = 128;
 const MAX_AUTH_TOKEN_LENGTH = 256;
 
 const internalServerError = (): ApiResponse<{ error: string; message: string }> => ({
@@ -21,9 +24,12 @@ function isLoginRequest(input: unknown): input is LoginRequest {
   if (!isPlainObject(input)) return false;
   return typeof input.email === "string"
     && input.email.trim().length > 0
+    && input.email.length <= MAX_AUTH_EMAIL_LENGTH
     && typeof input.password === "string"
     && input.password.length > 0
-    && (input.branchId === undefined || typeof input.branchId === "string");
+    && input.password.length <= MAX_AUTH_PASSWORD_LENGTH
+    && (input.branchId === undefined
+      || (typeof input.branchId === "string" && input.branchId.length <= MAX_AUTH_BRANCH_ID_LENGTH));
 }
 
 function isToken(input: unknown): input is string {
