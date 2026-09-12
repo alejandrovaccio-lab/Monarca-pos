@@ -33,6 +33,13 @@ describe("authentication API", () => {
     expect(mockedLogin).not.toHaveBeenCalled();
   });
 
+  it("rejects oversized login credentials before calling the core", async () => {
+    await expect(postLogin({ email: "a".repeat(255), password: "secret" })).resolves.toMatchObject({ status: 400, body: { error: "INVALID_REQUEST" } });
+    await expect(postLogin({ email: "test@monarca.mx", password: "p".repeat(257) })).resolves.toMatchObject({ status: 400, body: { error: "INVALID_REQUEST" } });
+    await expect(postLogin({ email: "test@monarca.mx", password: "secret", branchId: "b".repeat(129) })).resolves.toMatchObject({ status: 400, body: { error: "INVALID_REQUEST" } });
+    expect(mockedLogin).not.toHaveBeenCalled();
+  });
+
   it("rejects class instances as login bodies", async () => {
     class LoginPayload {
       email = "test@monarca.mx";
