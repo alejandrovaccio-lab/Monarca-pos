@@ -124,6 +124,14 @@ describe("authentication API", () => {
     expect(mockedLogout).not.toHaveBeenCalled();
   });
 
+  it("rejects oversized logout tokens before calling the core", async () => {
+    await expect(postLogout("a".repeat(257))).resolves.toEqual({
+      status: 401,
+      body: { error: "UNAUTHENTICATED" }
+    });
+    expect(mockedLogout).not.toHaveBeenCalled();
+  });
+
   it("logs out a valid token and returns 204", async () => {
     mockedLogout.mockResolvedValue({ id: "session-1", revokedAt: new Date() } as any);
 
@@ -151,6 +159,14 @@ describe("authentication API", () => {
     for (const token of [null, undefined, 123, {}, []]) {
       await expect(getMe(token as never)).resolves.toEqual({ status: 401, body: { error: "UNAUTHENTICATED" } });
     }
+    expect(mockedRequireSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized getMe tokens before calling middleware", async () => {
+    await expect(getMe("a".repeat(257))).resolves.toEqual({
+      status: 401,
+      body: { error: "UNAUTHENTICATED" }
+    });
     expect(mockedRequireSession).not.toHaveBeenCalled();
   });
 
