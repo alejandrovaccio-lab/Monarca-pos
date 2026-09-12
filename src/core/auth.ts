@@ -81,8 +81,17 @@ export async function login(email: string, password: string, branchId?: string) 
 }
 
 export async function logout(token: string) {
-  return prisma.userSession.update({
+  const session = await prisma.userSession.findUnique({
     where: { tokenHash: hashToken(token) },
+    select: { id: true, expiresAt: true, revokedAt: true }
+  });
+
+  if (!session || session.revokedAt || session.expiresAt <= new Date()) {
+    return null;
+  }
+
+  return prisma.userSession.update({
+    where: { id: session.id },
     data: { revokedAt: new Date() }
   });
 }
