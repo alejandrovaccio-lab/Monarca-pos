@@ -58,14 +58,19 @@ export async function postAuthorizationRequest(input: Parameters<typeof requestA
 
 export async function postAuthorizationDecision(
   input: Parameters<typeof resolveAuthorization>[0],
-  authenticatedUserId: string
+  authenticatedUserId?: string
 ) {
-  if (!isRequestBodyObject(input) || typeof authenticatedUserId !== "string" || authenticatedUserId.length === 0) {
+  if (!isRequestBodyObject(input)) {
     return { status: 400, body: { error: "INVALID_REQUEST" } };
   }
 
-  if (input.approverId !== authenticatedUserId) {
-    return { status: 403, body: { error: "AUTHORIZATION_APPROVER_MISMATCH" } };
+  if (authenticatedUserId !== undefined) {
+    if (authenticatedUserId.length === 0) {
+      return { status: 400, body: { error: "INVALID_REQUEST" } };
+    }
+    if (input.approverId !== authenticatedUserId) {
+      return { status: 403, body: { error: "AUTHORIZATION_APPROVER_MISMATCH" } };
+    }
   }
 
   try {
