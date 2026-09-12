@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/lib/prisma", () => ({
-  prisma: { userSession: { findUnique: vi.fn() } }
+  prisma: { userSession: { findUnique: vi.fn(), update: vi.fn() } }
 }));
 
 vi.mock("../src/core/context", () => ({
@@ -33,6 +33,7 @@ const validContext = {
 beforeEach(() => {
   vi.clearAllMocks();
   db.userSession.findUnique.mockResolvedValue(validSession);
+  db.userSession.update.mockResolvedValue(validSession);
   getContext.mockResolvedValue(validContext);
 });
 
