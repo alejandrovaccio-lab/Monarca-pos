@@ -5,6 +5,7 @@ const CLIENT_ERROR_CODES = new Set([
   "AUTHORIZATION_CRITICAL_APPROVER_REQUIRED",
   "AUTHORIZATION_REQUESTER_REQUIRED",
   "AUTHORIZATION_SCOPE_FORBIDDEN",
+  "AUTHORIZATION_APPROVER_MISMATCH",
   "SELF_APPROVAL_NOT_ALLOWED",
   "AUTHORIZATION_NOT_FOUND",
   "AUTHORIZATION_ALREADY_RESOLVED",
@@ -31,7 +32,7 @@ function authorizationError(error: unknown) {
     return { status: 500, body: { error: "INTERNAL_SERVER_ERROR" } };
   }
 
-  const status = code === "AUTHORIZATION_APPROVER_REQUIRED" || code === "AUTHORIZATION_CRITICAL_APPROVER_REQUIRED" || code === "AUTHORIZATION_REQUESTER_REQUIRED" || code === "AUTHORIZATION_SCOPE_FORBIDDEN" || code === "SELF_APPROVAL_NOT_ALLOWED" ? 403
+  const status = code === "AUTHORIZATION_APPROVER_REQUIRED" || code === "AUTHORIZATION_CRITICAL_APPROVER_REQUIRED" || code === "AUTHORIZATION_REQUESTER_REQUIRED" || code === "AUTHORIZATION_SCOPE_FORBIDDEN" || code === "AUTHORIZATION_APPROVER_MISMATCH" || code === "SELF_APPROVAL_NOT_ALLOWED" ? 403
     : code === "AUTHORIZATION_NOT_FOUND" ? 404
     : code === "AUTHORIZATION_ALREADY_RESOLVED" || code === "AUTHORIZATION_INTEGRITY_VIOLATION" || code === "AUTHORIZATION_TARGET_INVALID" ? 409
     : 400;
@@ -55,9 +56,16 @@ export async function postAuthorizationRequest(input: Parameters<typeof requestA
   }
 }
 
-export async function postAuthorizationDecision(input: Parameters<typeof resolveAuthorization>[0]) {
-  if (!isRequestBodyObject(input)) {
+export async function postAuthorizationDecision(
+  input: Parameters<typeof resolveAuthorization>[0],
+  authenticatedUserId: string
+) {
+  if (!isRequestBodyObject(input) || typeof authenticatedUserId !== "string" || authenticatedUserId.length === 0) {
     return { status: 400, body: { error: "INVALID_REQUEST" } };
+  }
+
+  if (input.approverId !== authenticatedUserId) {
+    return { status: 403, body: { error: "AUTHORIZATION_APPROVER_MISMATCH" } };
   }
 
   try {
