@@ -23,6 +23,11 @@ beforeEach(() => {
     id: "session-1",
     expiresAt: new Date(Date.now() + 86400000)
   });
+  db.userSession.findUnique.mockResolvedValue({
+    id: "session-1",
+    expiresAt: new Date(Date.now() + 86400000),
+    revokedAt: null
+  });
   db.userSession.update.mockResolvedValue({ id: "session-1", revokedAt: new Date() });
 });
 
@@ -117,7 +122,40 @@ describe("authentication", () => {
 
   it("revokes a session on logout", async () => {
     await logout("session-token");
+    expect(db.userSession.findUnique).toHaveBeenCalledOnce();
     expect(db.userSession.update).toHaveBeenCalledOnce();
-    expect(db.userSession.update.mock.calls[0][0].data.revokedAt).toBeInstanceOf(Date);
+    expect(db.userSession.update.mock.calls[0][0]).toMatchObject({
+      where: { id: "session-1" },
+      data: { revokedAt: expect.any(Date) }
+    });
+  });
+
+  it("returns null when logout receives an unknown session", async () => {
+    db.userSession.findUnique.mockResolvedValueOnce(null);
+
+    await expect(logout("unknown-token")).resolves.toBeNull();
+    expect(db.userSession.update).not.toHaveBeenCalled();
+  });
+
+  it("returns null when logout receives an already revoked session", async () => {
+    db.userSession.findUnique.mockResolvedValueOnce({
+      id: "session-1",
+      expiresAt: new Date(Date.now() + 86400000),
+      revokedAt: new Date()
+    });
+
+    await expect(logout("revoked-token")).resolves.toBeNull();
+    expect(db.userSession.update).not.toHaveBeenCalled();
+  });
+
+  it("returns null when logout receives an expired session", async () => {
+    db.userSession.findUnique.mockResolvedValueOnce({
+      id: "session-1",
+      expiresAt: new Date(Date.now() - 1000),
+      revokedAt: null
+    });
+
+    await expect(logout("expired-token")).resolves.toBeNull();
+    expect(db.userSession.update).not.toHaveBeenCalled();
   });
 });
