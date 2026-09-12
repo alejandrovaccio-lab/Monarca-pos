@@ -2,11 +2,17 @@ import { createHash } from "node:crypto";
 import { prisma } from "../lib/prisma";
 import { getSessionContext } from "../core/context";
 
+const MAX_AUTH_TOKEN_LENGTH = 256;
+
 const hashToken = (token: string) =>
   createHash("sha256").update(token).digest("hex");
 
+function isValidToken(token: unknown): token is string {
+  return typeof token === "string" && token.length > 0 && token.length <= MAX_AUTH_TOKEN_LENGTH;
+}
+
 export async function requireSession(token: string) {
-  if (!token) return null;
+  if (!isValidToken(token)) return null;
 
   const session = await prisma.userSession.findUnique({
     where: { tokenHash: hashToken(token) },
@@ -31,7 +37,7 @@ export async function requireSession(token: string) {
 }
 
 export async function requireBranchSession(token: string, branchId: string) {
-  if (!branchId) return null;
+  if (!isValidToken(token) || typeof branchId !== "string" || branchId.length === 0) return null;
 
   const context = await requireSession(token);
   if (!context || context.branchId !== branchId) return null;
