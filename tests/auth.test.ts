@@ -112,6 +112,16 @@ describe("authentication", () => {
     expect(db.userSession.create).not.toHaveBeenCalled();
   });
 
+  it("rejects oversized email, password, and branch identifiers before database access", async () => {
+    await expect(login("a".repeat(255), "password")).resolves.toMatchObject({ ok: false, reason: "INVALID_CREDENTIALS" });
+    await expect(login("test@monarca.mx", "p".repeat(257))).resolves.toMatchObject({ ok: false, reason: "INVALID_CREDENTIALS" });
+    await expect(login("test@monarca.mx", "password", "b".repeat(129))).resolves.toMatchObject({ ok: false, reason: "BRANCH_ACCESS_DENIED" });
+
+    expect(db.user.findFirst).not.toHaveBeenCalled();
+    expect(db.authCredential.findUnique).not.toHaveBeenCalled();
+    expect(db.userSession.create).not.toHaveBeenCalled();
+  });
+
   it("rejects inactive or unknown users", async () => {
     db.user.findFirst.mockResolvedValue(null);
 
