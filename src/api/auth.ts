@@ -49,7 +49,8 @@ export async function postLogin(request: LoginRequest): Promise<ApiResponse<unkn
 export async function postLogout(token: string): Promise<ApiResponse<unknown>> {
   if (!isToken(token)) return { status: 401, body: { error: "UNAUTHENTICATED" } };
   try {
-    await logout(token);
+    const result = await logout(token);
+    if (!result) return { status: 401, body: { error: "UNAUTHENTICATED" } };
     return { status: 204, body: null };
   } catch {
     return internalServerError();
