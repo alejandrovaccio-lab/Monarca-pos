@@ -4,6 +4,8 @@ import { requireSession } from "../middleware/auth";
 export type LoginRequest = { email: string; password: string; branchId?: string };
 export type ApiResponse<T> = { status: number; body: T };
 
+const MAX_AUTH_TOKEN_LENGTH = 256;
+
 const internalServerError = (): ApiResponse<{ error: string; message: string }> => ({
   status: 500,
   body: { error: "INTERNAL_SERVER_ERROR", message: "Internal server error." }
@@ -25,7 +27,9 @@ function isLoginRequest(input: unknown): input is LoginRequest {
 }
 
 function isToken(input: unknown): input is string {
-  return typeof input === "string" && input.length > 0;
+  return typeof input === "string"
+    && input.length > 0
+    && input.length <= MAX_AUTH_TOKEN_LENGTH;
 }
 
 export async function postLogin(request: LoginRequest): Promise<ApiResponse<unknown>> {
