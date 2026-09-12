@@ -125,10 +125,19 @@ describe("authentication API", () => {
   });
 
   it("logs out a valid token and returns 204", async () => {
-    mockedLogout.mockResolvedValue(undefined as any);
+    mockedLogout.mockResolvedValue({ id: "session-1", revokedAt: new Date() } as any);
 
     await expect(postLogout("token-1")).resolves.toEqual({ status: 204, body: null });
     expect(mockedLogout).toHaveBeenCalledWith("token-1");
+  });
+
+  it("maps an invalid or stale session from the core to HTTP 401", async () => {
+    mockedLogout.mockResolvedValue(null);
+
+    await expect(postLogout("stale-token")).resolves.toEqual({
+      status: 401,
+      body: { error: "UNAUTHENTICATED" }
+    });
   });
 
   it("rejects getMe without a valid session", async () => {
