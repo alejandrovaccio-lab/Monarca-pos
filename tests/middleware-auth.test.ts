@@ -28,6 +28,11 @@ describe("session authentication middleware", () => {
     expect(db.userSession.findUnique).not.toHaveBeenCalled();
   });
 
+  it("rejects an oversized token before hashing or querying", async () => {
+    await expect(requireSession("a".repeat(257))).resolves.toBeNull();
+    expect(db.userSession.findUnique).not.toHaveBeenCalled();
+  });
+
   it("rejects an unknown, revoked, or expired session before loading context", async () => {
     db.userSession.findUnique.mockResolvedValueOnce(null);
     await expect(requireSession("token-1")).resolves.toBeNull();
