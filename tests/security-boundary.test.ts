@@ -83,6 +83,13 @@ describe("security boundary", () => {
     });
   });
 
+  it("rejects an empty or oversized branch id before entering the session boundary", async () => {
+    await expect(requireBranchSession("valid-token", "")).resolves.toBeNull();
+    await expect(requireBranchSession("valid-token", "a".repeat(129))).resolves.toBeNull();
+
+    expect(db.userSession.findUnique).not.toHaveBeenCalled();
+  });
+
   it("does not treat a mismatched branch as a valid authenticated context", async () => {
     getContext.mockResolvedValue({ ...validContext, branchId: "branch-9" });
 
