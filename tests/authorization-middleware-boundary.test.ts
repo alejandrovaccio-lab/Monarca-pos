@@ -10,73 +10,81 @@ vi.mock("../src/core/authorization", () => ({
 }));
 
 vi.mock("../src/middleware/auth", () => ({
-  requireBranchSession: vi.fn(),
-  requireSession: vi.fn()
+  requireSession: vi.fn(),
+  requireBranchSession: vi.fn()
 }));
 
 import { prisma } from "../src/lib/prisma";
 import { canApproveAuthorization } from "../src/core/authorization";
-import { requireSession } from "../src/middleware/auth";
+import { requireSession, requireBranchSession } from "../src/middleware/auth";
 import { requireAuthorizationDecisionApprover } from "../src/middleware/authorization";
 
 const db = prisma as any;
-const mockedCanApprove = vi.mocked(canApproveAuthorization);
-const mockedRequireSession = vi.mocked(requireSession);
+const canApprove = canApproveAuthorization as any;
+const session = requireSession as any;
+const branchSession = requireBranchSession as any;
 
-const context = {
+const validContext = {
   sessionId: "session-1",
   userId: "user-1",
   branchId: "branch-1",
   user: { status: "ACTIVE", organizationId: "org-1" }
 };
 
+const validRequest = { organizationId: "org-1", branchId: "branch-1" };
+
 beforeEach(() => {
   vi.clearAllMocks();
-  mockedRequireSession.mockResolvedValue(context as any);
-  db.authorizationRequest.findUnique.mockResolvedValue({
-    organizationId: "org-1",
-    branchId: "branch-1"
-  });
-  mockedCanApprove.mockResolvedValue(true);
+  session.mockResolvedValue(validContext);
+  branchSession.mockResolvedValue(validContext);
+  db.authorizationRequest.findUnique.mockResolvedValue(validRequest);
+  canApprove.mockResolvedValue(true);
 });
 
-describe("authorization middleware boundary", () => {
-  it("rejects an empty request id before session or database access", async () => {
-    await expect(requireAuthorizationDecisionApprover("token", "")).resolves.toBeNull();
-    expect(mockedRequireSession).not.toHaveBeenCalled();
+describe("authorization middleware security boundary", () => {
+  it("rejects an empty or oversized request id before session lookup", async () => {
+    await expect(requireAuthorizationDecisionApprover("valid-token", "")).resolves.toBeNull();
+    await expect(requireAuthorizationDecisionApprover("valid-token", "a".repeat(129))).resolves.toBeNull();
+
+    expect(session).not.toHaveBeenCalled();
     expect(db.authorizationRequest.findUnique).not.toHaveBeenCalled();
   });
 
-  it("rejects an oversized request id before session or database access", async () => {
-    await expect(requireAuthorizationDecisionApprover("token", "a".repeat(129))).resolves.toBeNull();
-    expect(mockedRequireSession).not.toHaveBeenCalled();
-    expect(db.authorizationRequest.findUnique).not.toHaveBeenCalled();
+  it("does not reveal whether an unknown authorization request exists", async () => {
+    db.authorizationRequest.findUnique.mockResolvedValue(null);
+
+    await expect(requireAuthorizationDecisionApprover("valid-token", "request-1")).resolves.toBeNull();
+    expect(canApprove).not.toHaveBeenCalled();
   });
 
-  it("does not expose a request across organizations", async () => {
-    db.authorizationRequest.findUnique.mockResolvedValue({
-      organizationId: "org-2",
-      branchId: "branch-1"
+  it("rejects a request from another organization before checking approval role", async () => {
+    db.authorizationRequest.findUnique.mockResolvedValue({ organizationId: "org-2", branchId: "branch-1" });
+
+    await expect(requireAuthorizationDecisionApprover("valid-token", "request-1")).resolves.toBeNull();
+    expect(canApprove).not.toHaveBeenCalled();
+  });
+
+  it("rejects a request from another branch before checking approval role", async () => {
+    db.authorizationRequest.findUnique.mockResolvedValue({ organizationId: "org-1", branchId: "branch-2" });
+
+    await expect(requireAuthorizationDecisionApprover("valid-token", "request-1")).resolves.toBeNull();
+    expect(canApprove).not.toHaveBeenCalled();
+  });
+
+  it("rejects an authenticated user who cannot approve", async () => {
+    canApprove.mockResolvedValue(false);
+
+    await expect(requireAuthorizationDecisionApprover("valid-token", "request-1")).resolves.toBeNull();
+    expect(canApprove).toHaveBeenCalledWith("user-1");
+  });
+
+  it("returns the authenticated context only after session, scope and role checks pass", async () => {
+    await expect(requireAuthorizationDecisionApprover("valid-token", "request-1")).resolves.toEqual(validContext);
+    expect(session).toHaveBeenCalledWith("valid-token");
+    expect(db.authorizationRequest.findUnique).toHaveBeenCalledWith({
+      where: { id: "request-1" },
+      select: { organizationId: true, branchId: true }
     });
-
-    await expect(requireAuthorizationDecisionApprover("token", "auth-1")).resolves.toBeNull();
-    expect(mockedCanApprove).not.toHaveBeenCalled();
-  });
-
-  it("does not expose a branch-scoped request to another branch", async () => {
-    db.authorizationRequest.findUnique.mockResolvedValue({
-      organizationId: "org-1",
-      branchId: "branch-2"
-    });
-
-    await expect(requireAuthorizationDecisionApprover("token", "auth-1")).resolves.toBeNull();
-    expect(mockedCanApprove).not.toHaveBeenCalled();
-  });
-
-  it("requires approver capability only after request scope is validated", async () => {
-    mockedCanApprove.mockResolvedValue(false);
-
-    await expect(requireAuthorizationDecisionApprover("token", "auth-1")).resolves.toBeNull();
-    expect(mockedCanApprove).toHaveBeenCalledOnce();
+    expect(canApprove).toHaveBeenCalledWith("user-1");
   });
 });
