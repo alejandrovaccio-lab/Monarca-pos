@@ -2,6 +2,12 @@ import { prisma } from "../lib/prisma";
 import { canApproveAuthorization, hasPermission } from "../core/authorization";
 import { requireBranchSession, requireSession } from "./auth";
 
+const MAX_AUTHORIZATION_IDENTIFIER_LENGTH = 128;
+
+function isValidIdentifier(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_AUTHORIZATION_IDENTIFIER_LENGTH;
+}
+
 export async function requirePermission(userId: string, permissionCode: string) {
   return hasPermission(userId, permissionCode);
 }
@@ -35,6 +41,8 @@ export async function requireBranchAuthorizationApprover(token: string, branchId
 }
 
 export async function requireAuthorizationDecisionApprover(token: string, requestId: string) {
+  if (!isValidIdentifier(requestId)) return null;
+
   const context = await requireSession(token);
   if (!context) return null;
 
