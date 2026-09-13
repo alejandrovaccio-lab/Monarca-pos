@@ -3,12 +3,17 @@ import { prisma } from "../lib/prisma";
 import { getSessionContext } from "../core/context";
 
 const MAX_AUTH_TOKEN_LENGTH = 256;
+const MAX_AUTH_BRANCH_ID_LENGTH = 128;
 
 const hashToken = (token: string) =>
   createHash("sha256").update(token).digest("hex");
 
 function isValidToken(token: unknown): token is string {
   return typeof token === "string" && token.length > 0 && token.length <= MAX_AUTH_TOKEN_LENGTH;
+}
+
+function isValidIdentifier(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_AUTH_BRANCH_ID_LENGTH;
 }
 
 export async function requireSession(token: string) {
@@ -37,7 +42,7 @@ export async function requireSession(token: string) {
 }
 
 export async function requireBranchSession(token: string, branchId: string) {
-  if (!isValidToken(token) || typeof branchId !== "string" || branchId.length === 0) return null;
+  if (!isValidToken(token) || !isValidIdentifier(branchId)) return null;
 
   const context = await requireSession(token);
   if (!context || context.branchId !== branchId) return null;
