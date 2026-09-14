@@ -2,8 +2,21 @@ import { executeApprovedPurchaseReceipt, requestPurchaseReceipt } from "../core/
 import { getAuthenticatedContext } from "../core/auth-context";
 
 const MAX_PURCHASE_REQUEST_ID_LENGTH = 128;
+const MAX_PURCHASE_REASON_LENGTH = 1000;
+const MAX_PURCHASE_FOLIO_LENGTH = 128;
+const MAX_PURCHASE_ITEMS = 100;
 
 export async function postPurchaseRequest(input: Parameters<typeof requestPurchaseReceipt>[0]) {
+  if (typeof input.reason !== "string" || input.reason.trim().length === 0 || input.reason.length > MAX_PURCHASE_REASON_LENGTH) {
+    return { status: 400, body: { error: "PURCHASE_REASON_INVALID" } };
+  }
+  if (typeof input.folio !== "string" || input.folio.trim().length === 0 || input.folio.length > MAX_PURCHASE_FOLIO_LENGTH) {
+    return { status: 400, body: { error: "PURCHASE_FOLIO_INVALID" } };
+  }
+  if (!Array.isArray(input.items) || input.items.length === 0 || input.items.length > MAX_PURCHASE_ITEMS) {
+    return { status: 400, body: { error: "PURCHASE_ITEMS_LIMIT_INVALID" } };
+  }
+
   try {
     const auth = getAuthenticatedContext();
     const securedInput = auth ? { ...input, branchId: auth.branchId, requestedById: auth.userId } : input;
@@ -40,6 +53,9 @@ function mapPurchaseError(error: unknown) {
     "EMPLOYEE_BRANCH_INVALID",
     "PURCHASE_PRODUCT_INVALID",
     "PURCHASE_ITEMS_REQUIRED",
+    "PURCHASE_REASON_INVALID",
+    "PURCHASE_FOLIO_INVALID",
+    "PURCHASE_ITEMS_LIMIT_INVALID",
     "AUTHORIZATION_NOT_FOUND",
     "AUTHORIZATION_NOT_APPROVED",
     "PURCHASE_ALREADY_EXECUTED",
@@ -62,7 +78,7 @@ function mapPurchaseError(error: unknown) {
     "AUTHORIZATION_SCOPE_FORBIDDEN",
     "REQUESTER_BRANCH_INVALID",
   ].includes(code) ? 403
-    : ["BRANCH_NOT_FOUND", "SUPPLIER_BRANCH_INVALID", "EMPLOYEE_BRANCH_INVALID", "PURCHASE_PRODUCT_INVALID", "PURCHASE_ITEMS_REQUIRED"].includes(code) ? 400
+    : ["BRANCH_NOT_FOUND", "SUPPLIER_BRANCH_INVALID", "EMPLOYEE_BRANCH_INVALID", "PURCHASE_PRODUCT_INVALID", "PURCHASE_ITEMS_REQUIRED", "PURCHASE_REASON_INVALID", "PURCHASE_FOLIO_INVALID", "PURCHASE_ITEMS_LIMIT_INVALID"].includes(code) ? 400
     : ["AUTHORIZATION_NOT_FOUND"].includes(code) ? 404
     : ["AUTHORIZATION_NOT_APPROVED", "PURCHASE_ALREADY_EXECUTED"].includes(code) ? 409
     : 400;
