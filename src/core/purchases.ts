@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "../lib/prisma";
-import { canApproveAuthorization, requestAuthorization } from "./authorization";
+import { authorizationIntegrityHash, canApproveAuthorization, requestAuthorization } from "./authorization";
 
 export type PurchaseRequestItem = { productId: string; quantity: number; unitCost: number; taxRate?: number };
 
@@ -100,6 +100,21 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
   const folio = requested.folio.trim();
   if (Number.isNaN(purchasedAt.getTime())) throw new Error("PURCHASE_DATE_INVALID");
   if (!folio) throw new Error("PURCHASE_FOLIO_REQUIRED");
+
+  const expectedIntegrityHash = authorizationIntegrityHash({
+    organizationId: authorization.organizationId,
+    branchId: authorization.branchId ?? undefined,
+    requestedById: authorization.requestedById,
+    type: authorization.type,
+    reason: authorization.reason,
+    entityType: authorization.entityType,
+    entityId: authorization.entityId ?? undefined,
+    beforeData: authorization.beforeData,
+    requestedData: authorization.requestedData,
+  });
+  if (!authorization.integrityHash || authorization.integrityHash !== expectedIntegrityHash) {
+    throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+  }
 
   return prisma.$transaction(async (tx) => {
     const executor = await tx.user.findUnique({ where: { id: input.executorId }, select: { organizationId: true, status: true, branchAccess: { select: { branchId: true } } } });
