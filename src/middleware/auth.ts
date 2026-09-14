@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { prisma } from "../lib/prisma";
 import { getSessionContext } from "../core/context";
+import { setAuthenticatedContext } from "../core/auth-context";
 
 const MAX_AUTH_TOKEN_LENGTH = 256;
 const MAX_AUTH_BRANCH_ID_LENGTH = 128;
@@ -46,6 +47,12 @@ export async function requireBranchSession(token: string, branchId: string) {
 
   const context = await requireSession(token);
   if (!context || context.branchId !== branchId) return null;
+
+  setAuthenticatedContext({
+    userId: context.userId,
+    branchId: context.branchId,
+    organizationId: context.user.organizationId,
+  });
 
   return context;
 }
