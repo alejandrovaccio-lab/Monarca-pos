@@ -115,7 +115,7 @@ describe("HTTP authorization boundary", () => {
 
     expect(res.status).toBe(200);
     expect(requireAuthorizationDecisionApprover).toHaveBeenCalledWith("session-token", "auth-1");
-    expect(postAuthorizationDecision).toHaveBeenCalledWith({ requestId: "auth-1", approverId: "manager-1", decision: "APPROVED", notes: "approved" });
+    expect(postAuthorizationDecision).toHaveBeenCalledWith({ requestId: "auth-1", approverId: "manager-1", decision: "APPROVED", notes: "approved" }, "manager-1");
   });
 
   it("does not resolve an authorization when the derived decision session is invalid", async () => {
