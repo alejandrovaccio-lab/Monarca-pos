@@ -4,6 +4,15 @@ import { canApproveAuthorization, requestAuthorization } from "./authorization";
 
 export type PurchaseRequestItem = { productId: string; quantity: number; unitCost: number; taxRate?: number };
 
+const MAX_PURCHASE_FOLIO_LENGTH = 128;
+const MAX_PURCHASE_IDENTIFIER_LENGTH = 128;
+const MAX_PURCHASE_PRODUCT_ID_LENGTH = 128;
+const MAX_PURCHASE_ITEMS = 100;
+const MAX_PURCHASE_QUANTITY = 1_000_000;
+const MAX_PURCHASE_UNIT_COST = 1_000_000_000;
+const MAX_PURCHASE_TAX_RATE = 100;
+const MAX_PURCHASED_AT_LENGTH = 64;
+
 function validateItems(items: PurchaseRequestItem[]) {
   if (!items.length) throw new Error("PURCHASE_ITEMS_REQUIRED");
   for (const item of items) {
@@ -11,6 +20,37 @@ function validateItems(items: PurchaseRequestItem[]) {
     if (!Number.isFinite(item.unitCost) || item.unitCost < 0) throw new Error("PURCHASE_UNIT_COST_INVALID");
     if (item.taxRate !== undefined && (!Number.isFinite(item.taxRate) || item.taxRate < 0)) throw new Error("PURCHASE_TAX_RATE_INVALID");
   }
+}
+
+function validPurchaseIdentifier(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_PURCHASE_IDENTIFIER_LENGTH;
+}
+
+function validPurchaseItem(value: unknown) {
+  if (!value || typeof value !== "object") return false;
+  const item = value as { productId?: unknown; quantity?: unknown; unitCost?: unknown; taxRate?: unknown };
+  if (typeof item.productId !== "string" || item.productId.trim().length === 0 || item.productId.length > MAX_PURCHASE_PRODUCT_ID_LENGTH) return false;
+  if (typeof item.quantity !== "number" || !Number.isFinite(item.quantity) || item.quantity <= 0 || item.quantity > MAX_PURCHASE_QUANTITY) return false;
+  if (typeof item.unitCost !== "number" || !Number.isFinite(item.unitCost) || item.unitCost < 0 || item.unitCost > MAX_PURCHASE_UNIT_COST) return false;
+  if (item.taxRate !== undefined && (typeof item.taxRate !== "number" || !Number.isFinite(item.taxRate) || item.taxRate < 0 || item.taxRate > MAX_PURCHASE_TAX_RATE)) return false;
+  return true;
+}
+
+function validPurchasedAt(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_PURCHASED_AT_LENGTH && !Number.isNaN(new Date(value).getTime());
+}
+
+function validRequestedPurchaseData(value: unknown) {
+  if (!value || typeof value !== "object") return false;
+  const requested = value as { purchaseId?: unknown; branchId?: unknown; supplierId?: unknown; folio?: unknown; employeeId?: unknown; purchasedAt?: unknown; items?: unknown };
+  if (!validPurchaseIdentifier(requested.purchaseId)) return false;
+  if (!validPurchaseIdentifier(requested.branchId)) return false;
+  if (!validPurchaseIdentifier(requested.supplierId)) return false;
+  if (!validPurchaseIdentifier(requested.employeeId)) return false;
+  if (typeof requested.folio !== "string" || requested.folio.trim().length === 0 || requested.folio.length > MAX_PURCHASE_FOLIO_LENGTH) return false;
+  if (!validPurchasedAt(requested.purchasedAt)) return false;
+  if (!Array.isArray(requested.items) || requested.items.length === 0 || requested.items.length > MAX_PURCHASE_ITEMS) return false;
+  return requested.items.every(validPurchaseItem);
 }
 
 export async function requestPurchaseReceipt(input: { branchId: string; requestedById: string; employeeId: string; supplierId: string; folio: string; reason: string; purchasedAt?: string | Date; items: PurchaseRequestItem[] }) {
@@ -43,10 +83,11 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
   if (authorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
   if (authorization.entityType !== "Purchase" || !authorization.entityId) throw new Error("AUTHORIZATION_ENTITY_INVALID");
   const requested = authorization.requestedData as { purchaseId?: string; branchId?: string; supplierId?: string; folio?: string; employeeId?: string; purchasedAt?: string; items?: PurchaseRequestItem[] } | null;
-  if (!requested || requested.purchaseId !== authorization.entityId || requested.branchId !== authorization.branchId || !requested.supplierId || !requested.folio || !requested.employeeId || !requested.purchasedAt || !requested.items) throw new Error("AUTHORIZATION_TARGET_INVALID");
-  validateItems(requested.items);
-  const purchasedAt = new Date(requested.purchasedAt);
-  const folio = requested.folio.trim();
+  if (!validRequestedPurchaseData(requested)) throw new Error("AUTHORIZATION_TARGET_INVALID");
+  if (requested.purchaseId !== authorization.entityId || requested.branchId !== authorization.branchId) throw new Error("AUTHORIZATION_TARGET_INVALID");
+  validateItems(requested.items!);
+  const purchasedAt = new Date(requested.purchasedAt!);
+  const folio = requested.folio!.trim();
   if (Number.isNaN(purchasedAt.getTime())) throw new Error("PURCHASE_DATE_INVALID");
   if (!folio) throw new Error("PURCHASE_FOLIO_REQUIRED");
 
