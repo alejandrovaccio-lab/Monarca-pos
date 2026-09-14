@@ -11,7 +11,11 @@ vi.mock("../src/lib/prisma", () => ({
 vi.mock("../src/core/authorization", () => ({
   canApproveAuthorization: vi.fn(),
   requestAuthorization: vi.fn(),
-  authorizationIntegrityHash: vi.fn(() => "test-integrity-hash"),
+  authorizationIntegrityHash: vi.fn((input: any) =>
+    input.requestedData?.items?.[0]?.productId === "product-2"
+      ? "changed-integrity-hash"
+      : "test-integrity-hash"
+  ),
 }));
 
 import { prisma } from "../src/lib/prisma";
