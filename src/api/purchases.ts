@@ -1,6 +1,8 @@
 import { executeApprovedPurchaseReceipt, requestPurchaseReceipt } from "../core/purchases";
 import { getAuthenticatedContext } from "../core/auth-context";
 
+const MAX_PURCHASE_REQUEST_ID_LENGTH = 128;
+
 export async function postPurchaseRequest(input: Parameters<typeof requestPurchaseReceipt>[0]) {
   try {
     const auth = getAuthenticatedContext();
@@ -12,6 +14,10 @@ export async function postPurchaseRequest(input: Parameters<typeof requestPurcha
 }
 
 export async function postPurchaseExecution(input: Parameters<typeof executeApprovedPurchaseReceipt>[0]) {
+  if (typeof input.requestId !== "string" || input.requestId.length === 0 || input.requestId.length > MAX_PURCHASE_REQUEST_ID_LENGTH) {
+    return { status: 400, body: { error: "PURCHASE_REQUEST_ID_INVALID" } };
+  }
+
   try {
     const auth = getAuthenticatedContext();
     const securedInput = auth ? { ...input, executorId: auth.userId } : input;
