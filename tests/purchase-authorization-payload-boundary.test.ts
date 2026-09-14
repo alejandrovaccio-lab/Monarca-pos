@@ -47,7 +47,18 @@ const baseAuthorization = (requestedData: unknown, integrityHash?: string | null
     reason: "Compra autorizada",
     integrityHash: null as string | null,
   };
-  return { ...authorization, integrityHash: integrityHash === undefined ? mocks.authorizationIntegrityHash(authorization) : integrityHash };
+  const hashInput = {
+    organizationId: authorization.organizationId,
+    branchId: authorization.branchId,
+    requestedById: authorization.requestedById,
+    type: authorization.type,
+    reason: authorization.reason,
+    entityType: authorization.entityType,
+    entityId: authorization.entityId,
+    beforeData: authorization.beforeData,
+    requestedData: authorization.requestedData,
+  };
+  return { ...authorization, integrityHash: integrityHash === undefined ? mocks.authorizationIntegrityHash(hashInput) : integrityHash };
 };
 
 describe("purchase execution persisted authorization payload boundary", () => {
