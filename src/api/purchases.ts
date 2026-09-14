@@ -35,7 +35,10 @@ export async function postPurchaseRequest(input: Parameters<typeof requestPurcha
   if (typeof input.folio !== "string" || input.folio.trim().length === 0 || input.folio.length > MAX_PURCHASE_FOLIO_LENGTH) {
     return { status: 400, body: { error: "PURCHASE_FOLIO_INVALID" } };
   }
-  if (!Array.isArray(input.items) || input.items.length === 0 || input.items.length > MAX_PURCHASE_ITEMS || !input.items.every(validPurchaseItem)) {
+  if (!Array.isArray(input.items) || input.items.length === 0 || input.items.length > MAX_PURCHASE_ITEMS) {
+    return { status: 400, body: { error: "PURCHASE_ITEMS_LIMIT_INVALID" } };
+  }
+  if (!input.items.every(validPurchaseItem)) {
     return { status: 400, body: { error: "PURCHASE_ITEM_INPUT_INVALID" } };
   }
 
