@@ -10,6 +10,7 @@ const MAX_PURCHASE_PRODUCT_ID_LENGTH = 128;
 const MAX_PURCHASE_QUANTITY = 1_000_000;
 const MAX_PURCHASE_UNIT_COST = 1_000_000_000;
 const MAX_PURCHASE_TAX_RATE = 100;
+const MAX_PURCHASED_AT_LENGTH = 64;
 
 function validPurchaseIdentifier(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_PURCHASE_IDENTIFIER_LENGTH;
@@ -23,6 +24,13 @@ function validPurchaseItem(value: unknown) {
   if (typeof item.unitCost !== "number" || !Number.isFinite(item.unitCost) || item.unitCost < 0 || item.unitCost > MAX_PURCHASE_UNIT_COST) return false;
   if (item.taxRate !== undefined && (typeof item.taxRate !== "number" || !Number.isFinite(item.taxRate) || item.taxRate < 0 || item.taxRate > MAX_PURCHASE_TAX_RATE)) return false;
   return true;
+}
+
+function validPurchasedAt(value: unknown) {
+  if (value === undefined) return true;
+  if (value instanceof Date) return !Number.isNaN(value.getTime());
+  if (typeof value !== "string" || value.trim().length === 0 || value.length > MAX_PURCHASED_AT_LENGTH) return false;
+  return !Number.isNaN(new Date(value).getTime());
 }
 
 export async function postPurchaseRequest(input: Parameters<typeof requestPurchaseReceipt>[0]) {
@@ -40,6 +48,9 @@ export async function postPurchaseRequest(input: Parameters<typeof requestPurcha
   }
   if (!input.items.every(validPurchaseItem)) {
     return { status: 400, body: { error: "PURCHASE_ITEM_INPUT_INVALID" } };
+  }
+  if (!validPurchasedAt(input.purchasedAt)) {
+    return { status: 400, body: { error: "PURCHASE_DATE_INVALID" } };
   }
 
   try {
@@ -105,7 +116,7 @@ function mapPurchaseError(error: unknown) {
     "AUTHORIZATION_SCOPE_FORBIDDEN",
     "REQUESTER_BRANCH_INVALID",
   ].includes(code) ? 403
-    : ["BRANCH_NOT_FOUND", "SUPPLIER_BRANCH_INVALID", "EMPLOYEE_BRANCH_INVALID", "PURCHASE_PRODUCT_INVALID", "PURCHASE_ITEMS_REQUIRED", "PURCHASE_IDENTIFIER_INVALID", "PURCHASE_REASON_INVALID", "PURCHASE_FOLIO_INVALID", "PURCHASE_ITEMS_LIMIT_INVALID", "PURCHASE_ITEM_INPUT_INVALID"].includes(code) ? 400
+    : ["BRANCH_NOT_FOUND", "SUPPLIER_BRANCH_INVALID", "EMPLOYEE_BRANCH_INVALID", "PURCHASE_PRODUCT_INVALID", "PURCHASE_ITEMS_REQUIRED", "PURCHASE_IDENTIFIER_INVALID", "PURCHASE_REASON_INVALID", "PURCHASE_FOLIO_INVALID", "PURCHASE_ITEMS_LIMIT_INVALID", "PURCHASE_ITEM_INPUT_INVALID", "PURCHASE_DATE_INVALID"].includes(code) ? 400
     : ["AUTHORIZATION_NOT_FOUND"].includes(code) ? 404
     : ["AUTHORIZATION_NOT_APPROVED", "PURCHASE_ALREADY_EXECUTED"].includes(code) ? 409
     : 400;
