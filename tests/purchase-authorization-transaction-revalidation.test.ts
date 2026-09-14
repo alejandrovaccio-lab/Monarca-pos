@@ -44,7 +44,7 @@ const authorization = {
 };
 
 function setup(currentAuthorization = authorization) {
-  canApproveAuthorization.mockResolvedValue(true);
+  vi.mocked(canApproveAuthorization).mockImplementation(async () => true);
   db.authorizationRequest.findUnique.mockResolvedValue(authorization);
   const tx = {
     authorizationRequest: { findUnique: vi.fn().mockResolvedValue(currentAuthorization) },
