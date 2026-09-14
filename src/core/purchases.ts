@@ -117,35 +117,63 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
   }
 
   return prisma.$transaction(async (tx) => {
+    const currentAuthorization = await tx.authorizationRequest.findUnique({ where: { id: authorization.id } });
+    if (!currentAuthorization) throw new Error("AUTHORIZATION_NOT_FOUND");
+    if (currentAuthorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
+    if (currentAuthorization.organizationId !== authorization.organizationId || currentAuthorization.branchId !== authorization.branchId || currentAuthorization.requestedById !== authorization.requestedById || currentAuthorization.type !== authorization.type || currentAuthorization.reason !== authorization.reason || currentAuthorization.entityType !== authorization.entityType || currentAuthorization.entityId !== authorization.entityId) {
+      throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    }
+    const currentIntegrityHash = authorizationIntegrityHash({
+      organizationId: currentAuthorization.organizationId,
+      branchId: currentAuthorization.branchId ?? undefined,
+      requestedById: currentAuthorization.requestedById,
+      type: currentAuthorization.type,
+      reason: currentAuthorization.reason,
+      entityType: currentAuthorization.entityType,
+      entityId: currentAuthorization.entityId ?? undefined,
+      beforeData: currentAuthorization.beforeData,
+      requestedData: currentAuthorization.requestedData,
+    });
+    if (!currentAuthorization.integrityHash || currentAuthorization.integrityHash !== currentIntegrityHash || currentAuthorization.integrityHash !== authorization.integrityHash) {
+      throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    }
+    const currentRequested = currentAuthorization.requestedData as RequestedPurchaseData | null;
+    if (!validRequestedPurchaseData(currentRequested)) throw new Error("AUTHORIZATION_TARGET_INVALID");
+    if (currentRequested.purchaseId !== currentAuthorization.entityId || currentRequested.branchId !== currentAuthorization.branchId) throw new Error("AUTHORIZATION_TARGET_INVALID");
+
     const executor = await tx.user.findUnique({ where: { id: input.executorId }, select: { organizationId: true, status: true, branchAccess: { select: { branchId: true } } } });
     if (!executor || executor.status === "INACTIVE") throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
-    if (executor.organizationId !== authorization.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
-    if (authorization.branchId && !executor.branchAccess.some(({ branchId }) => branchId === authorization.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+    if (executor.organizationId !== currentAuthorization.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+    if (currentAuthorization.branchId && !executor.branchAccess.some(({ branchId }) => branchId === currentAuthorization.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
-    const existing = await tx.purchase.findUnique({ where: { id: requested.purchaseId } });
+    const existing = await tx.purchase.findUnique({ where: { id: currentRequested.purchaseId } });
     if (existing) throw new Error("PURCHASE_ALREADY_EXECUTED");
+    const currentPurchasedAt = new Date(currentRequested.purchasedAt);
+    const currentFolio = currentRequested.folio.trim();
+    if (Number.isNaN(currentPurchasedAt.getTime())) throw new Error("PURCHASE_DATE_INVALID");
+    if (!currentFolio) throw new Error("PURCHASE_FOLIO_REQUIRED");
     const [branch, supplier, employee] = await Promise.all([
-      tx.branch.findUnique({ where: { id: authorization.branchId! }, select: { organizationId: true } }),
-      tx.supplier.findUnique({ where: { id: requested.supplierId }, select: { organizationId: true } }),
-      tx.employee.findUnique({ where: { id: requested.employeeId }, select: { organizationId: true } }),
+      tx.branch.findUnique({ where: { id: currentAuthorization.branchId! }, select: { organizationId: true } }),
+      tx.supplier.findUnique({ where: { id: currentRequested.supplierId }, select: { organizationId: true } }),
+      tx.employee.findUnique({ where: { id: currentRequested.employeeId }, select: { organizationId: true } }),
     ]);
-    if (!branch || branch.organizationId !== authorization.organizationId) throw new Error("BRANCH_NOT_FOUND");
-    if (!supplier || supplier.organizationId !== authorization.organizationId) throw new Error("SUPPLIER_BRANCH_INVALID");
-    if (!employee || employee.organizationId !== authorization.organizationId) throw new Error("EMPLOYEE_BRANCH_INVALID");
-    const productIds = [...new Set(requested.items.map((item) => item.productId))];
-    const products = await tx.product.findMany({ where: { id: { in: productIds }, organizationId: authorization.organizationId }, select: { id: true } });
+    if (!branch || branch.organizationId !== currentAuthorization.organizationId) throw new Error("BRANCH_NOT_FOUND");
+    if (!supplier || supplier.organizationId !== currentAuthorization.organizationId) throw new Error("SUPPLIER_BRANCH_INVALID");
+    if (!employee || employee.organizationId !== currentAuthorization.organizationId) throw new Error("EMPLOYEE_BRANCH_INVALID");
+    const productIds = [...new Set(currentRequested.items.map((item) => item.productId))];
+    const products = await tx.product.findMany({ where: { id: { in: productIds }, organizationId: currentAuthorization.organizationId }, select: { id: true } });
     if (products.length !== productIds.length) throw new Error("PURCHASE_PRODUCT_INVALID");
 
-    const purchase = await tx.purchase.create({ data: { id: requested.purchaseId, branchId: authorization.branchId!, supplierId: requested.supplierId, folio, purchasedAt, items: { create: requested.items.map((item) => ({ productId: item.productId, quantity: item.quantity, unitCost: item.unitCost, taxRate: item.taxRate ?? null })) } } });
-    for (const item of requested.items) {
-      const current = await tx.inventoryBalance.findUnique({ where: { branchId_productId: { branchId: authorization.branchId!, productId: item.productId } }, select: { quantity: true } });
+    const purchase = await tx.purchase.create({ data: { id: currentRequested.purchaseId, branchId: currentAuthorization.branchId!, supplierId: currentRequested.supplierId, folio: currentFolio, purchasedAt: currentPurchasedAt, items: { create: currentRequested.items.map((item) => ({ productId: item.productId, quantity: item.quantity, unitCost: item.unitCost, taxRate: item.taxRate ?? null })) } } });
+    for (const item of currentRequested.items) {
+      const current = await tx.inventoryBalance.findUnique({ where: { branchId_productId: { branchId: currentAuthorization.branchId!, productId: item.productId } }, select: { quantity: true } });
       const previousQuantity = Number(current?.quantity ?? 0);
       const newQuantity = previousQuantity + item.quantity;
-      await tx.inventoryBalance.upsert({ where: { branchId_productId: { branchId: authorization.branchId!, productId: item.productId } }, create: { branchId: authorization.branchId!, productId: item.productId, quantity: newQuantity }, update: { quantity: newQuantity } });
-      await tx.inventoryMovement.create({ data: { branchId: authorization.branchId!, productId: item.productId, type: "PURCHASE", quantity: item.quantity, unitCost: item.unitCost, referenceType: "PURCHASE", referenceId: purchase.id, userId: input.executorId, employeeId: requested.employeeId, occurredAt: purchasedAt, notes: `Compra ${folio}: ${authorization.reason}` } });
-      await tx.productCost.create({ data: { productId: item.productId, cost: item.unitCost, source: `PURCHASE:${purchase.id}`, effectiveAt: purchasedAt } });
+      await tx.inventoryBalance.upsert({ where: { branchId_productId: { branchId: currentAuthorization.branchId!, productId: item.productId } }, create: { branchId: currentAuthorization.branchId!, productId: item.productId, quantity: newQuantity }, update: { quantity: newQuantity } });
+      await tx.inventoryMovement.create({ data: { branchId: currentAuthorization.branchId!, productId: item.productId, type: "PURCHASE", quantity: item.quantity, unitCost: item.unitCost, referenceType: "PURCHASE", referenceId: purchase.id, userId: input.executorId, employeeId: currentRequested.employeeId, occurredAt: currentPurchasedAt, notes: `Compra ${currentFolio}: ${currentAuthorization.reason}` } });
+      await tx.productCost.create({ data: { productId: item.productId, cost: item.unitCost, source: `PURCHASE:${purchase.id}`, effectiveAt: currentPurchasedAt } });
     }
-    await tx.auditLog.create({ data: { organizationId: authorization.organizationId, branchId: authorization.branchId, userId: input.executorId, action: "PURCHASE_RECEIVED", entityType: "Purchase", entityId: purchase.id, beforeData: { inventoryChanged: false }, afterData: { purchaseId: purchase.id, supplierId: requested.supplierId, folio, employeeId: requested.employeeId, items: requested.items, authorizationRequestId: authorization.id } } });
+    await tx.auditLog.create({ data: { organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId, userId: input.executorId, action: "PURCHASE_RECEIVED", entityType: "Purchase", entityId: purchase.id, beforeData: { inventoryChanged: false }, afterData: { purchaseId: purchase.id, supplierId: currentRequested.supplierId, folio: currentFolio, employeeId: currentRequested.employeeId, items: currentRequested.items, authorizationRequestId: currentAuthorization.id } } });
     return purchase;
   });
 }
