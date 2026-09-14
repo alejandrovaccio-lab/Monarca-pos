@@ -1,8 +1,11 @@
 import { executeApprovedPurchaseReceipt, requestPurchaseReceipt } from "../core/purchases";
+import { getAuthenticatedContext } from "../core/auth-context";
 
 export async function postPurchaseRequest(input: Parameters<typeof requestPurchaseReceipt>[0]) {
   try {
-    return { status: 201, body: await requestPurchaseReceipt(input) };
+    const auth = getAuthenticatedContext();
+    const securedInput = auth ? { ...input, branchId: auth.branchId, requestedById: auth.userId } : input;
+    return { status: 201, body: await requestPurchaseReceipt(securedInput) };
   } catch (error) {
     return mapPurchaseError(error);
   }
@@ -10,7 +13,9 @@ export async function postPurchaseRequest(input: Parameters<typeof requestPurcha
 
 export async function postPurchaseExecution(input: Parameters<typeof executeApprovedPurchaseReceipt>[0]) {
   try {
-    return { status: 200, body: await executeApprovedPurchaseReceipt(input) };
+    const auth = getAuthenticatedContext();
+    const securedInput = auth ? { ...input, executorId: auth.userId } : input;
+    return { status: 200, body: await executeApprovedPurchaseReceipt(securedInput) };
   } catch (error) {
     return mapPurchaseError(error);
   }
