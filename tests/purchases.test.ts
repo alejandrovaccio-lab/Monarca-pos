@@ -63,4 +63,63 @@ describe("purchase receipts", () => {
     await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "user-1" }))
       .rejects.toThrow("AUTHORIZATION_APPROVER_REQUIRED");
   });
+
+  it("rejects an inactive executor before loading the authorization", async () => {
+    canApproveAuthorization.mockResolvedValue(true);
+    db.authorizationRequest.findUnique.mockResolvedValue(null);
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "user-1" }))
+      .rejects.toThrow("AUTHORIZATION_NOT_FOUND");
+  });
+
+  it("rejects an executor from another organization inside the transaction", async () => {
+    canApproveAuthorization.mockResolvedValue(true);
+    const authorization = {
+      id: "auth-1", status: "APPROVED", organizationId: "org-1", branchId: "branch-1",
+      entityType: "Purchase", entityId: "purchase-1", reason: "Resurtido",
+      requestedData: { purchaseId: "purchase-1", branchId: "branch-1", supplierId: "supplier-1", folio: "FAC-100", employeeId: "emp-1", purchasedAt: new Date().toISOString(), items: [{ productId: "product-1", quantity: 1, unitCost: 10 }] },
+    };
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization);
+    const tx = {
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
+      user: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-2", status: "ACTIVE", branchAccess: [{ branchId: "branch-1" }] }) },
+    };
+    db.$transaction.mockImplementation(async (callback: any) => callback(tx));
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "user-1" }))
+      .rejects.toThrow("AUTHORIZATION_SCOPE_FORBIDDEN");
+    expect(tx.user.findUnique).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an executor without access to the authorization branch", async () => {
+    canApproveAuthorization.mockResolvedValue(true);
+    const authorization = {
+      id: "auth-1", status: "APPROVED", organizationId: "org-1", branchId: "branch-1",
+      entityType: "Purchase", entityId: "purchase-1", reason: "Resurtido",
+      requestedData: { purchaseId: "purchase-1", branchId: "branch-1", supplierId: "supplier-1", folio: "FAC-100", employeeId: "emp-1", purchasedAt: new Date().toISOString(), items: [{ productId: "product-1", quantity: 1, unitCost: 10 }] },
+    };
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization);
+    const tx = {
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
+      user: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1", status: "ACTIVE", branchAccess: [{ branchId: "branch-2" }] }) },
+    };
+    db.$transaction.mockImplementation(async (callback: any) => callback(tx));
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "user-1" }))
+      .rejects.toThrow("AUTHORIZATION_SCOPE_FORBIDDEN");
+  });
+
+  it("rejects an inactive executor inside the transaction", async () => {
+    canApproveAuthorization.mockResolvedValue(true);
+    const authorization = {
+      id: "auth-1", status: "APPROVED", organizationId: "org-1", branchId: "branch-1",
+      entityType: "Purchase", entityId: "purchase-1", reason: "Resurtido",
+      requestedData: { purchaseId: "purchase-1", branchId: "branch-1", supplierId: "supplier-1", folio: "FAC-100", employeeId: "emp-1", purchasedAt: new Date().toISOString(), items: [{ productId: "product-1", quantity: 1, unitCost: 10 }] },
+    };
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization);
+    const tx = {
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
+      user: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1", status: "INACTIVE", branchAccess: [{ branchId: "branch-1" }] }) },
+    };
+    db.$transaction.mockImplementation(async (callback: any) => callback(tx));
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "user-1" }))
+      .rejects.toThrow("AUTHORIZATION_APPROVER_REQUIRED");
+  });
 });
