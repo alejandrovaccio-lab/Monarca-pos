@@ -1,12 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { executeApprovedPurchaseReceipt } from "../src/core/purchases";
-
-const db = {
-  authorizationRequest: { findUnique: vi.fn() },
-  user: { findUnique: vi.fn() },
-  $transaction: vi.fn(),
-};
+const { db } = vi.hoisted(() => ({
+  db: {
+    authorizationRequest: { findUnique: vi.fn() },
+    user: { findUnique: vi.fn() },
+    $transaction: vi.fn(),
+  },
+}));
 
 vi.mock("../src/lib/prisma", () => ({ prisma: db }));
 
@@ -16,7 +16,13 @@ vi.mock("../src/core/authorization", () => ({
   authorizationIntegrityHash: vi.fn(() => "test-integrity-hash"),
 }));
 
+import { executeApprovedPurchaseReceipt } from "../src/core/purchases";
+
 describe("purchase authorization transaction atomicity", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("re-fetches authorization through the transaction client before purchase writes", async () => {
     const authorization = {
       id: "auth-1",
