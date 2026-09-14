@@ -84,6 +84,7 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
   if (authorization.entityType !== "Purchase" || !authorization.entityId) throw new Error("AUTHORIZATION_ENTITY_INVALID");
   const requested = authorization.requestedData as { purchaseId?: string; branchId?: string; supplierId?: string; folio?: string; employeeId?: string; purchasedAt?: string; items?: PurchaseRequestItem[] } | null;
   if (!validRequestedPurchaseData(requested)) throw new Error("AUTHORIZATION_TARGET_INVALID");
+  if (requested === null) throw new Error("AUTHORIZATION_TARGET_INVALID");
   if (requested.purchaseId !== authorization.entityId || requested.branchId !== authorization.branchId) throw new Error("AUTHORIZATION_TARGET_INVALID");
   validateItems(requested.items!);
   const purchasedAt = new Date(requested.purchasedAt!);
@@ -120,7 +121,7 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
       await tx.inventoryMovement.create({ data: { branchId: authorization.branchId!, productId: item.productId, type: "PURCHASE", quantity: item.quantity, unitCost: item.unitCost, referenceType: "PURCHASE", referenceId: purchase.id, userId: input.executorId, employeeId: requested.employeeId, occurredAt: purchasedAt, notes: `Compra ${folio}: ${authorization.reason}` } });
       await tx.productCost.create({ data: { productId: item.productId, cost: item.unitCost, source: `PURCHASE:${purchase.id}`, effectiveAt: purchasedAt } });
     }
-    await tx.auditLog.create({ data: { organizationId: authorization.organizationId, branchId: authorization.branchId, userId: input.executorId, action: "PURCHASE_RECEIVED", entityType: "Purchase", entityId: purchase.id, beforeData: { inventoryChanged: false }, afterData: { purchaseId: purchase.id, supplierId: requested.supplierId, folio, employeeId: requested.employeeId, items: requested.items, authorizationRequestId: authorization.id } } });
+    await tx.auditLog.create({ data: { organizationId: authorization.organizationId, branchId: authorization.branchId, userId: input.executorId, action: "PURCHASE_RECEIVED", entityType: "Purchase", entityId: purchase.id, beforeData: { inventoryChanged: false }, afterData: { purchaseId: purchase.id, supplierId: requested.supplierId, folio, employeeId: requested.employeeId, items: requested.items, authorizationRequestId: authorization.id } });
     return purchase;
   });
 }
