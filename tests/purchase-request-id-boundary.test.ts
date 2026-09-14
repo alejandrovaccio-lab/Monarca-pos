@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   executeApprovedPurchaseReceipt: vi.fn(),
@@ -10,6 +10,10 @@ vi.mock("../src/core/purchases", () => mocks);
 import { postPurchaseExecution } from "../src/api/purchases";
 
 describe("purchase requestId security boundary", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("rejects an empty requestId before reaching the purchase core", async () => {
     const result = await postPurchaseExecution({ requestId: "", executorId: "user-1" });
 
