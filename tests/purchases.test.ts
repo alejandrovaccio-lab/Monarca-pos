@@ -16,6 +16,7 @@ vi.mock("../src/lib/prisma", () => ({
 vi.mock("../src/core/authorization", () => ({
   canApproveAuthorization: vi.fn(),
   requestAuthorization: vi.fn(),
+  authorizationIntegrityHash: vi.fn(() => "test-integrity-hash"),
 }));
 
 import { prisma } from "../src/lib/prisma";
@@ -75,7 +76,8 @@ describe("purchase receipts", () => {
     canApproveAuthorization.mockResolvedValue(true);
     const authorization = {
       id: "auth-1", status: "APPROVED", organizationId: "org-1", branchId: "branch-1",
-      entityType: "Purchase", entityId: "purchase-1", reason: "Resurtido",
+      requestedById: "requester-1", type: "OTHER", entityType: "Purchase", entityId: "purchase-1",
+      reason: "Resurtido", beforeData: null, integrityHash: "test-integrity-hash",
       requestedData: { purchaseId: "purchase-1", branchId: "branch-1", supplierId: "supplier-1", folio: "FAC-100", employeeId: "emp-1", purchasedAt: new Date().toISOString(), items: [{ productId: "product-1", quantity: 1, unitCost: 10 }] },
     };
     db.authorizationRequest.findUnique.mockResolvedValue(authorization);
@@ -93,7 +95,8 @@ describe("purchase receipts", () => {
     canApproveAuthorization.mockResolvedValue(true);
     const authorization = {
       id: "auth-1", status: "APPROVED", organizationId: "org-1", branchId: "branch-1",
-      entityType: "Purchase", entityId: "purchase-1", reason: "Resurtido",
+      requestedById: "requester-1", type: "OTHER", entityType: "Purchase", entityId: "purchase-1",
+      reason: "Resurtido", beforeData: null, integrityHash: "test-integrity-hash",
       requestedData: { purchaseId: "purchase-1", branchId: "branch-1", supplierId: "supplier-1", folio: "FAC-100", employeeId: "emp-1", purchasedAt: new Date().toISOString(), items: [{ productId: "product-1", quantity: 1, unitCost: 10 }] },
     };
     db.authorizationRequest.findUnique.mockResolvedValue(authorization);
@@ -110,7 +113,8 @@ describe("purchase receipts", () => {
     canApproveAuthorization.mockResolvedValue(true);
     const authorization = {
       id: "auth-1", status: "APPROVED", organizationId: "org-1", branchId: "branch-1",
-      entityType: "Purchase", entityId: "purchase-1", reason: "Resurtido",
+      requestedById: "requester-1", type: "OTHER", entityType: "Purchase", entityId: "purchase-1",
+      reason: "Resurtido", beforeData: null, integrityHash: "test-integrity-hash",
       requestedData: { purchaseId: "purchase-1", branchId: "branch-1", supplierId: "supplier-1", folio: "FAC-100", employeeId: "emp-1", purchasedAt: new Date().toISOString(), items: [{ productId: "product-1", quantity: 1, unitCost: 10 }] },
     };
     db.authorizationRequest.findUnique.mockResolvedValue(authorization);
