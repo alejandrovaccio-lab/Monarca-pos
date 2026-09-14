@@ -33,6 +33,10 @@ function validPurchasedAt(value: unknown) {
   return !Number.isNaN(new Date(value).getTime());
 }
 
+function validPurchaseRequestId(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_PURCHASE_REQUEST_ID_LENGTH;
+}
+
 export async function postPurchaseRequest(input: Parameters<typeof requestPurchaseReceipt>[0]) {
   if (!validPurchaseIdentifier(input.branchId) || !validPurchaseIdentifier(input.requestedById) || !validPurchaseIdentifier(input.employeeId) || !validPurchaseIdentifier(input.supplierId)) {
     return { status: 400, body: { error: "PURCHASE_IDENTIFIER_INVALID" } };
@@ -63,7 +67,7 @@ export async function postPurchaseRequest(input: Parameters<typeof requestPurcha
 }
 
 export async function postPurchaseExecution(input: Parameters<typeof executeApprovedPurchaseReceipt>[0]) {
-  if (typeof input.requestId !== "string" || input.requestId.length === 0 || input.requestId.length > MAX_PURCHASE_REQUEST_ID_LENGTH) {
+  if (!validPurchaseRequestId(input.requestId)) {
     return { status: 400, body: { error: "PURCHASE_REQUEST_ID_INVALID" } };
   }
 
