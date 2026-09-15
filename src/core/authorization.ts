@@ -152,15 +152,17 @@ export async function requestAuthorization(input: {
   if (!persistedReason) throw new Error("AUTHORIZATION_REASON_REQUIRED");
   if (persistedReason.length > MAX_AUTHORIZATION_REASON_LENGTH) throw new Error("AUTHORIZATION_REASON_TOO_LONG");
 
-  const requester = await prisma.user.findUnique({ where: { id: input.requestedById }, include: { branchAccess: true } });
+  const requester = await prisma.user.findUnique({
+    where: { id: input.requestedById },
+    include: {
+      branchAccess: input.branchId
+        ? { where: { branchId: input.branchId, branch: { organizationId: input.organizationId } } }
+        : true
+    }
+  });
   if (!requester || requester.status === "INACTIVE") throw new Error("AUTHORIZATION_REQUESTER_REQUIRED");
   if (requester.organizationId !== input.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
-
-  if (input.branchId) {
-    const branch = await prisma.branch.findUnique({ where: { id: input.branchId }, select: { organizationId: true } });
-    if (!branch || branch.organizationId !== input.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
-    if (!requester.branchAccess.some(({ branchId }) => branchId === input.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
-  }
+  if (input.branchId && !requester.branchAccess.some(({ branchId }) => branchId === input.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
   const integrityHash = authorizationIntegrityHash({ ...input, reason: persistedReason, entityType });
   return prisma.authorizationRequest.create({ data: {
@@ -179,7 +181,10 @@ export async function resolveAuthorization(input: {
   const notes = input.notes?.trim();
   if (notes && notes.length > MAX_AUTHORIZATION_NOTES_LENGTH) throw new Error("AUTHORIZATION_NOTES_TOO_LONG");
 
-  const approver = await prisma.user.findUnique({ where: { id: input.approverId }, include: { roles: { include: { role: true } }, branchAccess: true } });
+  const approver = await prisma.user.findUnique({
+    where: { id: input.approverId },
+    include: { roles: { include: { role: true } }, branchAccess: true }
+  });
   if (!approver || approver.status === "INACTIVE") throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
   if (!hasApproverRole(approver, APPROVER_ROLES)) throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
 
@@ -189,15 +194,25 @@ export async function resolveAuthorization(input: {
   if (request.requestedById === input.approverId) throw new Error("SELF_APPROVAL_NOT_ALLOWED");
   if (request.status !== "PENDING") throw new Error("AUTHORIZATION_ALREADY_RESOLVED");
   if (approver.organizationId !== request.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
-  if (request.branchId && !approver.branchAccess.some(({ branchId }) => branchId === request.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
   if (request.branchId) {
-    const branch = await prisma.branch.findUnique({ where: { id: request.branchId }, select: { organizationId: true } });
-    if (!branch || branch.organizationId !== request.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+    const approverBranchAccess = await prisma.user.findUnique({
+      where: { id: input.approverId },
+      select: { branchAccess: { where: { branchId: request.branchId, branch: { organizationId: request.organizationId } }, select: { branchId: true } } }
+    });
+    if (!approverBranchAccess?.branchAccess.some(({ branchId }) => branchId === request.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
   }
 
   return prisma.$transaction(async (tx) => {
-    const currentApprover = await tx.user.findUnique({ where: { id: input.approverId }, include: { roles: { include: { role: true } }, branchAccess: true } });
+    const currentApprover = await tx.user.findUnique({
+      where: { id: input.approverId },
+      include: {
+        roles: { include: { role: true } },
+        branchAccess: request.branchId
+          ? { where: { branchId: request.branchId, branch: { organizationId: request.organizationId } } }
+          : true
+      }
+    });
     if (!currentApprover || currentApprover.status === "INACTIVE") throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
     if (!hasApproverRole(currentApprover, APPROVER_ROLES)) throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
     if (request.branchId && !currentApprover.branchAccess.some(({ branchId }) => branchId === request.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
@@ -211,10 +226,6 @@ export async function resolveAuthorization(input: {
     if (currentRequest.organizationId !== request.organizationId || currentRequest.branchId !== request.branchId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
     if (currentRequest.type !== request.type || currentRequest.reason !== request.reason || currentRequest.entityType !== request.entityType || currentRequest.entityId !== request.entityId || currentRequest.requestedById !== request.requestedById) {
       throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
-    }
-    if (currentRequest.branchId) {
-      const branch = await tx.branch.findUnique({ where: { id: currentRequest.branchId }, select: { organizationId: true } });
-      if (!branch || branch.organizationId !== currentRequest.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
     }
     const expectedIntegrityHash = authorizationIntegrityHash({
       organizationId: currentRequest.organizationId,
