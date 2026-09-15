@@ -23,8 +23,8 @@ const sale = {
   branchId: "branch-1",
   status: "COMPLETED",
   items: [
-    { productId: "product-1", quantity: 2, costSnapshot: 10 },
-    { productId: "product-2", quantity: 0.5, costSnapshot: 20 },
+    { id: "item-1", productId: "product-1", quantity: 2, costSnapshot: 10 },
+    { id: "item-2", productId: "product-2", quantity: 0.5, costSnapshot: 20 },
   ],
 };
 
@@ -91,6 +91,12 @@ describe("authorized sale inventory restoration", () => {
     });
     expect(upsert).toHaveBeenCalledTimes(2);
     expect(movement).toHaveBeenCalledTimes(2);
+    expect(movement).toHaveBeenNthCalledWith(1, {
+      data: expect.objectContaining({ referenceType: "SALE_CANCEL_ITEM", referenceId: "item-1" }),
+    });
+    expect(movement).toHaveBeenNthCalledWith(2, {
+      data: expect.objectContaining({ referenceType: "SALE_CANCEL_ITEM", referenceId: "item-2" }),
+    });
     expect(audit).toHaveBeenCalledOnce();
   });
 
@@ -136,16 +142,16 @@ describe("authorized sale inventory restoration", () => {
     expect(upsert).toHaveBeenCalledTimes(2);
     expect(movement).toHaveBeenNthCalledWith(1, {
       data: expect.objectContaining({
-        referenceType: "SALE_REFUND",
-        referenceId: "sale-1",
+        referenceType: "SALE_REFUND_ITEM",
+        referenceId: "item-1",
         quantity: 2,
         unitCost: 10,
       }),
     });
     expect(movement).toHaveBeenNthCalledWith(2, {
       data: expect.objectContaining({
-        referenceType: "SALE_REFUND",
-        referenceId: "sale-1",
+        referenceType: "SALE_REFUND_ITEM",
+        referenceId: "item-2",
         quantity: 0.5,
         unitCost: 20,
       }),
