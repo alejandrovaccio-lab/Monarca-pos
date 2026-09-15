@@ -27,7 +27,7 @@ const MAX_PURCHASED_AT_LENGTH = 64;
 function validateItems(items: PurchaseRequestItem[]) {
   if (!items.length) throw new Error("PURCHASE_ITEMS_REQUIRED");
   for (const item of items) {
-    if (!item.productId || !Number.isFinite(item.quantity) || item.quantity <= 0) throw new Error("PURCHASE_ITEM_INVALID");
+    if (!Number.isFinite(item.quantity) || item.quantity <= 0) throw new Error("PURCHASE_ITEM_INVALID");
     if (!Number.isFinite(item.unitCost) || item.unitCost < 0) throw new Error("PURCHASE_UNIT_COST_INVALID");
     if (item.taxRate !== undefined && (!Number.isFinite(item.taxRate) || item.taxRate < 0)) throw new Error("PURCHASE_TAX_RATE_INVALID");
   }
@@ -54,10 +54,7 @@ function validPurchasedAt(value: unknown): value is string {
 function validRequestedPurchaseData(value: unknown): value is RequestedPurchaseData {
   if (!value || typeof value !== "object") return false;
   const requested = value as { purchaseId?: unknown; branchId?: unknown; supplierId?: unknown; folio?: unknown; employeeId?: unknown; purchasedAt?: unknown; items?: unknown };
-  if (!validPurchaseIdentifier(requested.purchaseId)) return false;
-  if (!validPurchaseIdentifier(requested.branchId)) return false;
-  if (!validPurchaseIdentifier(requested.supplierId)) return false;
-  if (!validPurchaseIdentifier(requested.employeeId)) return false;
+  if (!validPurchaseIdentifier(requested.purchaseId) || !validPurchaseIdentifier(requested.branchId) || !validPurchaseIdentifier(requested.supplierId) || !validPurchaseIdentifier(requested.employeeId)) return false;
   if (typeof requested.folio !== "string" || requested.folio.trim().length === 0 || requested.folio.length > MAX_PURCHASE_FOLIO_LENGTH) return false;
   if (!validPurchasedAt(requested.purchasedAt)) return false;
   if (!Array.isArray(requested.items) || requested.items.length === 0 || requested.items.length > MAX_PURCHASE_ITEMS) return false;
@@ -97,50 +94,18 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
   if (!validRequestedPurchaseData(requested)) throw new Error("AUTHORIZATION_TARGET_INVALID");
   if (requested.purchaseId !== authorization.entityId || requested.branchId !== authorization.branchId) throw new Error("AUTHORIZATION_TARGET_INVALID");
   validateItems(requested.items);
-  const purchasedAt = new Date(requested.purchasedAt);
-  const folio = requested.folio.trim();
-  if (Number.isNaN(purchasedAt.getTime())) throw new Error("PURCHASE_DATE_INVALID");
-  if (!folio) throw new Error("PURCHASE_FOLIO_REQUIRED");
-
-  const expectedIntegrityHash = authorizationIntegrityHash({
-    organizationId: authorization.organizationId,
-    branchId: authorization.branchId ?? undefined,
-    requestedById: authorization.requestedById,
-    type: authorization.type,
-    reason: authorization.reason,
-    entityType: authorization.entityType,
-    entityId: authorization.entityId ?? undefined,
-    beforeData: authorization.beforeData,
-    requestedData: authorization.requestedData,
-  });
-  if (!authorization.integrityHash || authorization.integrityHash !== expectedIntegrityHash) {
-    throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
-  }
+  const expectedIntegrityHash = authorizationIntegrityHash({ organizationId: authorization.organizationId, branchId: authorization.branchId ?? undefined, requestedById: authorization.requestedById, type: authorization.type, reason: authorization.reason, entityType: authorization.entityType, entityId: authorization.entityId ?? undefined, beforeData: authorization.beforeData, requestedData: authorization.requestedData });
+  if (!authorization.integrityHash || authorization.integrityHash !== expectedIntegrityHash) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
 
   return prisma.$transaction(async (tx) => {
     const currentAuthorization = await tx.authorizationRequest.findUnique({ where: { id: authorization.id } });
     if (!currentAuthorization) throw new Error("AUTHORIZATION_NOT_FOUND");
     if (currentAuthorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
-    if (currentAuthorization.organizationId !== authorization.organizationId || currentAuthorization.branchId !== authorization.branchId || currentAuthorization.requestedById !== authorization.requestedById || currentAuthorization.type !== authorization.type || currentAuthorization.reason !== authorization.reason || currentAuthorization.entityType !== authorization.entityType || currentAuthorization.entityId !== authorization.entityId) {
-      throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
-    }
-    const currentIntegrityHash = authorizationIntegrityHash({
-      organizationId: currentAuthorization.organizationId,
-      branchId: currentAuthorization.branchId ?? undefined,
-      requestedById: currentAuthorization.requestedById,
-      type: currentAuthorization.type,
-      reason: currentAuthorization.reason,
-      entityType: currentAuthorization.entityType,
-      entityId: currentAuthorization.entityId ?? undefined,
-      beforeData: currentAuthorization.beforeData,
-      requestedData: currentAuthorization.requestedData,
-    });
-    if (!currentAuthorization.integrityHash || currentAuthorization.integrityHash !== currentIntegrityHash || currentAuthorization.integrityHash !== authorization.integrityHash) {
-      throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
-    }
+    if (currentAuthorization.organizationId !== authorization.organizationId || currentAuthorization.branchId !== authorization.branchId || currentAuthorization.requestedById !== authorization.requestedById || currentAuthorization.type !== authorization.type || currentAuthorization.reason !== authorization.reason || currentAuthorization.entityType !== authorization.entityType || currentAuthorization.entityId !== authorization.entityId) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    const currentIntegrityHash = authorizationIntegrityHash({ organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId ?? undefined, requestedById: currentAuthorization.requestedById, type: currentAuthorization.type, reason: currentAuthorization.reason, entityType: currentAuthorization.entityType, entityId: currentAuthorization.entityId ?? undefined, beforeData: currentAuthorization.beforeData, requestedData: currentAuthorization.requestedData });
+    if (!currentAuthorization.integrityHash || currentAuthorization.integrityHash !== currentIntegrityHash || currentAuthorization.integrityHash !== authorization.integrityHash) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     const currentRequested = currentAuthorization.requestedData as RequestedPurchaseData | null;
     if (!validRequestedPurchaseData(currentRequested)) throw new Error("AUTHORIZATION_TARGET_INVALID");
-    if (currentRequested.purchaseId !== currentAuthorization.entityId || currentRequested.branchId !== currentAuthorization.branchId) throw new Error("AUTHORIZATION_TARGET_INVALID");
 
     const executor = await tx.user.findUnique({ where: { id: input.executorId }, select: { organizationId: true, status: true, branchAccess: { select: { branchId: true } }, roles: { select: { role: { select: { name: true } } } } } });
     if (!executor || executor.status === "INACTIVE") throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
@@ -148,18 +113,14 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     if (executor.organizationId !== currentAuthorization.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
     if (currentAuthorization.branchId && !executor.branchAccess.some(({ branchId }) => branchId === currentAuthorization.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
-    const approval = await tx.authorizationApproval.findFirst({
-      where: { authorizationRequestId: currentAuthorization.id, decision: "APPROVED" },
-      orderBy: { approvedAt: "desc" },
-      select: { id: true, approverId: true, decision: true },
-    });
-    if (!approval || approval.decision !== "APPROVED") throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    const approval = await tx.authorizationApproval.findFirst({ where: { authorizationRequestId: currentAuthorization.id, decision: "APPROVED" }, orderBy: { approvedAt: "desc" }, select: { id: true, approverId: true, decision: true } });
+    if (!approval || approval.decision !== "APPROVED" || approval.approverId !== input.executorId) throw new Error("AUTHORIZATION_APPROVER_MISMATCH");
 
     const existing = await tx.purchase.findUnique({ where: { id: currentRequested.purchaseId } });
     if (existing) throw new Error("PURCHASE_ALREADY_EXECUTED");
     const currentPurchasedAt = new Date(currentRequested.purchasedAt);
-    const currentFolio = currentRequested.folio.trim();
     if (Number.isNaN(currentPurchasedAt.getTime())) throw new Error("PURCHASE_DATE_INVALID");
+    const currentFolio = currentRequested.folio.trim();
     if (!currentFolio) throw new Error("PURCHASE_FOLIO_REQUIRED");
     const [branch, supplier, employee] = await Promise.all([
       tx.branch.findUnique({ where: { id: currentAuthorization.branchId! }, select: { organizationId: true } }),
@@ -182,7 +143,7 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
       await tx.inventoryMovement.create({ data: { branchId: currentAuthorization.branchId!, productId: item.productId, type: "PURCHASE", quantity: item.quantity, unitCost: item.unitCost, referenceType: "PURCHASE", referenceId: purchase.id, userId: input.executorId, employeeId: currentRequested.employeeId, occurredAt: currentPurchasedAt, notes: `Compra ${currentFolio}: ${currentAuthorization.reason}` } });
       await tx.productCost.create({ data: { productId: item.productId, cost: item.unitCost, source: `PURCHASE:${purchase.id}`, effectiveAt: currentPurchasedAt } });
     }
-    await tx.auditLog.create({ data: { organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId, userId: input.executorId, action: "PURCHASE_RECEIVED", entityType: "Purchase", entityId: purchase.id, beforeData: { inventoryChanged: false }, afterData: { purchaseId: purchase.id, supplierId: currentRequested.supplierId, folio: currentFolio, employeeId: currentRequested.employeeId, items: currentRequested.items, authorizationRequestId: currentAuthorization.id } } });
+    await tx.auditLog.create({ data: { organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId, userId: input.executorId, action: "PURCHASE_RECEIVED", entityType: "Purchase", entityId: purchase.id, beforeData: { inventoryChanged: false }, afterData: { purchaseId: purchase.id, supplierId: currentRequested.supplierId, folio: currentFolio, employeeId: currentRequested.employeeId, items: currentRequested.items, authorizationRequestId: currentAuthorization.id, approvalId: approval.id, approverId: approval.approverId } } });
     return purchase;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
