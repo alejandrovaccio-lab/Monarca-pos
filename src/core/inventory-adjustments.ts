@@ -1,20 +1,10 @@
 import { prisma } from "../lib/prisma";
 import { authorizationIntegrityHash, canApproveAuthorization, requestAuthorization } from "./authorization";
 
-export type InventoryAdjustmentType =
-  | "ENTRY"
-  | "EXIT"
-  | "COUNT_CORRECTION"
-  | "WASTE"
-  | "SHRINKAGE";
+export type InventoryAdjustmentType = "ENTRY" | "EXIT" | "COUNT_CORRECTION" | "WASTE" | "SHRINKAGE";
 
-const INVENTORY_ADJUSTMENT_TYPES = new Set<InventoryAdjustmentType>([
-  "ENTRY", "EXIT", "COUNT_CORRECTION", "WASTE", "SHRINKAGE",
-]);
-
-const MOVEMENT_TYPE = {
-  ENTRY: "ADJUSTMENT", EXIT: "ADJUSTMENT", COUNT_CORRECTION: "ADJUSTMENT", WASTE: "WASTE", SHRINKAGE: "SHRINKAGE",
-} as const;
+const INVENTORY_ADJUSTMENT_TYPES = new Set<InventoryAdjustmentType>(["ENTRY", "EXIT", "COUNT_CORRECTION", "WASTE", "SHRINKAGE"]);
+const MOVEMENT_TYPE = { ENTRY: "ADJUSTMENT", EXIT: "ADJUSTMENT", COUNT_CORRECTION: "ADJUSTMENT", WASTE: "WASTE", SHRINKAGE: "SHRINKAGE" } as const;
 
 function deltaFor(type: InventoryAdjustmentType, quantity: number) {
   if (!INVENTORY_ADJUSTMENT_TYPES.has(type) || !Number.isFinite(quantity) || quantity <= 0) throw new Error("INVENTORY_QUANTITY_INVALID");
@@ -31,30 +21,20 @@ function parseAuthorizedInventoryPayload(value: unknown): AuthorizedInventoryPay
   const payload = value as Record<string, unknown>;
   const allowedKeys = new Set(["branchId", "productId", "employeeId", "adjustmentType", "quantity", "delta", "resultingQuantity", "unitCost"]);
   if (Object.keys(payload).some((key) => !allowedKeys.has(key))) throw new Error("AUTHORIZATION_TARGET_INVALID");
-  if (
-    typeof payload.branchId !== "string" || typeof payload.productId !== "string" || typeof payload.employeeId !== "string" ||
-    typeof payload.adjustmentType !== "string" || typeof payload.quantity !== "number" || typeof payload.delta !== "number" ||
-    typeof payload.resultingQuantity !== "number" || (payload.unitCost !== null && typeof payload.unitCost !== "number")
-  ) throw new Error("AUTHORIZATION_TARGET_INVALID");
+  if (typeof payload.branchId !== "string" || typeof payload.productId !== "string" || typeof payload.employeeId !== "string" || typeof payload.adjustmentType !== "string" || typeof payload.quantity !== "number" || typeof payload.delta !== "number" || typeof payload.resultingQuantity !== "number" || (payload.unitCost !== null && typeof payload.unitCost !== "number")) throw new Error("AUTHORIZATION_TARGET_INVALID");
   const adjustmentType = payload.adjustmentType as InventoryAdjustmentType;
   if (!INVENTORY_ADJUSTMENT_TYPES.has(adjustmentType)) throw new Error("AUTHORIZATION_TARGET_INVALID");
   if (!Number.isFinite(payload.quantity) || payload.quantity <= 0 || !Number.isFinite(payload.delta)) throw new Error("AUTHORIZATION_TARGET_INVALID");
   if (deltaFor(adjustmentType, payload.quantity) !== payload.delta || !Number.isFinite(payload.resultingQuantity)) throw new Error("AUTHORIZATION_TARGET_INVALID");
   if (payload.unitCost !== null && (!Number.isFinite(payload.unitCost) || payload.unitCost < 0)) throw new Error("AUTHORIZATION_TARGET_INVALID");
-  return {
-    branchId: payload.branchId, productId: payload.productId, employeeId: payload.employeeId, adjustmentType,
-    quantity: payload.quantity, delta: payload.delta, resultingQuantity: payload.resultingQuantity, unitCost: payload.unitCost,
-  };
+  return { branchId: payload.branchId, productId: payload.productId, employeeId: payload.employeeId, adjustmentType, quantity: payload.quantity, delta: payload.delta, resultingQuantity: payload.resultingQuantity, unitCost: payload.unitCost };
 }
 
 function sameAuthorizedInventoryPayload(a: unknown, b: unknown) {
   try { return JSON.stringify(parseAuthorizedInventoryPayload(a)) === JSON.stringify(parseAuthorizedInventoryPayload(b)); } catch { return false; }
 }
 
-export async function requestInventoryAdjustment(input: {
-  branchId: string; productId: string; requestedById: string; employeeId: string; type: InventoryAdjustmentType;
-  quantity: number; reason: string; unitCost?: number;
-}) {
+export async function requestInventoryAdjustment(input: { branchId: string; productId: string; requestedById: string; employeeId: string; type: InventoryAdjustmentType; quantity: number; reason: string; unitCost?: number }) {
   if (!input.reason.trim()) throw new Error("AUTHORIZATION_REASON_REQUIRED");
   const delta = deltaFor(input.type, input.quantity);
   const [branch, product, employee, balance] = await Promise.all([
@@ -94,12 +74,7 @@ export async function executeApprovedInventoryAdjustment(input: { requestId: str
   const requested = parseAuthorizedInventoryPayload(authorization.requestedData);
   if (requested.branchId !== authorization.branchId || requested.productId !== authorization.entityId) throw new Error("AUTHORIZATION_TARGET_INVALID");
 
-  const expectedIntegrityHash = authorizationIntegrityHash({
-    organizationId: authorization.organizationId, branchId: authorization.branchId ?? undefined,
-    requestedById: authorization.requestedById, type: authorization.type, reason: authorization.reason,
-    entityType: authorization.entityType, entityId: authorization.entityId ?? undefined,
-    beforeData: authorization.beforeData, requestedData: authorization.requestedData,
-  });
+  const expectedIntegrityHash = authorizationIntegrityHash({ organizationId: authorization.organizationId, branchId: authorization.branchId ?? undefined, requestedById: authorization.requestedById, type: authorization.type, reason: authorization.reason, entityType: authorization.entityType, entityId: authorization.entityId ?? undefined, beforeData: authorization.beforeData, requestedData: authorization.requestedData });
   if (authorization.integrityHash && authorization.integrityHash !== expectedIntegrityHash) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
 
   return prisma.$transaction(async (tx) => {
@@ -109,12 +84,7 @@ export async function executeApprovedInventoryAdjustment(input: { requestId: str
     if (currentAuthorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
     if (currentAuthorization.entityType !== "InventoryBalance" || currentAuthorization.entityId !== authorization.entityId || currentAuthorization.organizationId !== authorization.organizationId || currentAuthorization.branchId !== authorization.branchId) throw new Error("AUTHORIZATION_TARGET_INVALID");
 
-    const currentHash = authorizationIntegrityHash({
-      organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId ?? undefined,
-      requestedById: currentAuthorization.requestedById, type: currentAuthorization.type, reason: currentAuthorization.reason,
-      entityType: currentAuthorization.entityType, entityId: currentAuthorization.entityId ?? undefined,
-      beforeData: currentAuthorization.beforeData, requestedData: currentAuthorization.requestedData,
-    });
+    const currentHash = authorizationIntegrityHash({ organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId ?? undefined, requestedById: currentAuthorization.requestedById, type: currentAuthorization.type, reason: currentAuthorization.reason, entityType: currentAuthorization.entityType, entityId: currentAuthorization.entityId ?? undefined, beforeData: currentAuthorization.beforeData, requestedData: currentAuthorization.requestedData });
     if (currentAuthorization.integrityHash && currentAuthorization.integrityHash !== currentHash) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     if (authorization.integrityHash && currentAuthorization.integrityHash !== authorization.integrityHash) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
 
@@ -125,6 +95,12 @@ export async function executeApprovedInventoryAdjustment(input: { requestId: str
     const currentExecutor = await tx.user.findUnique({ where: { id: input.executorId }, select: { id: true, organizationId: true, status: true, branchAccess: { where: { branchId: currentAuthorization.branchId ?? "" }, select: { branchId: true } } } });
     if (!currentExecutor || currentExecutor.status !== "ACTIVE" || currentExecutor.organizationId !== currentAuthorization.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
     if (currentAuthorization.branchId && !currentExecutor.branchAccess.length) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+
+    const approval = await tx.authorizationApproval.findFirst({ where: { authorizationRequestId: currentAuthorization.id, decision: "APPROVED" }, orderBy: { approvedAt: "desc" } });
+    if (!approval || approval.approverId !== input.executorId) throw new Error("AUTHORIZATION_APPROVAL_INVALID");
+    if (!(approval.approvedAt instanceof Date) || Number.isNaN(approval.approvedAt.getTime())) throw new Error("AUTHORIZATION_APPROVAL_INVALID");
+    if (currentAuthorization.resolvedAt && approval.approvedAt.getTime() > currentAuthorization.resolvedAt.getTime()) throw new Error("AUTHORIZATION_APPROVAL_INVALID");
+
     const alreadyExecuted = await tx.inventoryMovement.findFirst({ where: { referenceType: `MANUAL_${currentRequested.adjustmentType}`, referenceId: authorization.id }, select: { id: true } });
     if (alreadyExecuted) throw new Error("AUTHORIZATION_ALREADY_EXECUTED");
     const employee = await tx.employee.findUnique({ where: { id: currentRequested.employeeId }, select: { organizationId: true } });
@@ -135,13 +111,14 @@ export async function executeApprovedInventoryAdjustment(input: { requestId: str
     if (newQuantity < 0) throw new Error("INVENTORY_NEGATIVE_NOT_ALLOWED");
     if (Number(currentRequested.resultingQuantity) !== newQuantity) throw new Error("INVENTORY_CHANGED_SINCE_REQUEST");
     await tx.inventoryBalance.upsert({ where: { branchId_productId: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId! } }, create: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId!, quantity: newQuantity }, update: { quantity: newQuantity } });
+    let movement;
     try {
-      await tx.inventoryMovement.create({ data: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId!, type: MOVEMENT_TYPE[currentRequested.adjustmentType], quantity: currentRequested.delta, unitCost: currentRequested.unitCost, referenceType: `MANUAL_${currentRequested.adjustmentType}`, referenceId: authorization.id, userId: input.executorId, employeeId: currentRequested.employeeId, occurredAt: new Date(), notes: `${currentRequested.adjustmentType}: ${currentAuthorization.reason}` } });
+      movement = await tx.inventoryMovement.create({ data: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId!, type: MOVEMENT_TYPE[currentRequested.adjustmentType], quantity: currentRequested.delta, unitCost: currentRequested.unitCost, referenceType: `MANUAL_${currentRequested.adjustmentType}`, referenceId: authorization.id, userId: input.executorId, employeeId: currentRequested.employeeId, occurredAt: new Date(), notes: `${currentRequested.adjustmentType}: ${currentAuthorization.reason} | authorizationRequestId=${currentAuthorization.id} | authorizationApprovalId=${approval.id}` } });
     } catch (error: any) {
       if (error?.code === "P2002") throw new Error("AUTHORIZATION_ALREADY_EXECUTED");
       throw error;
     }
-    await tx.auditLog.create({ data: { organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId, userId: input.executorId, action: `INVENTORY_${currentRequested.adjustmentType}`, entityType: "InventoryBalance", entityId: currentAuthorization.entityId, beforeData: { quantity: currentQuantity, productId: currentAuthorization.entityId }, afterData: { quantity: newQuantity, delta: currentRequested.delta, employeeId: currentRequested.employeeId, authorizationRequestId: authorization.id } } });
-    return { branchId: currentAuthorization.branchId, productId: currentAuthorization.entityId, previousQuantity: currentQuantity, newQuantity, delta: currentRequested.delta, adjustmentType: currentRequested.adjustmentType };
+    await tx.auditLog.create({ data: { organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId, userId: input.executorId, action: `INVENTORY_${currentRequested.adjustmentType}`, entityType: "InventoryBalance", entityId: currentAuthorization.entityId, beforeData: { quantity: currentQuantity, productId: currentAuthorization.entityId, authorizationRequestId: currentAuthorization.id, authorizationApprovalId: approval.id }, afterData: { quantity: newQuantity, delta: currentRequested.delta, employeeId: currentRequested.employeeId, authorizationRequestId: currentAuthorization.id, authorizationApprovalId: approval.id, inventoryMovementId: movement.id } } });
+    return { branchId: currentAuthorization.branchId, productId: currentAuthorization.entityId, previousQuantity: currentQuantity, newQuantity, delta: currentRequested.delta, adjustmentType: currentRequested.adjustmentType, authorizationRequestId: currentAuthorization.id, authorizationApprovalId: approval.id, inventoryMovementId: movement.id };
   });
 }
