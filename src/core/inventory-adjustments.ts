@@ -110,15 +110,21 @@ export async function executeApprovedInventoryAdjustment(input: { requestId: str
     const newQuantity = currentQuantity + currentRequested.delta;
     if (newQuantity < 0) throw new Error("INVENTORY_NEGATIVE_NOT_ALLOWED");
     if (Number(currentRequested.resultingQuantity) !== newQuantity) throw new Error("INVENTORY_CHANGED_SINCE_REQUEST");
+
+    const executionAt = new Date();
     await tx.inventoryBalance.upsert({ where: { branchId_productId: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId! } }, create: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId!, quantity: newQuantity }, update: { quantity: newQuantity } });
     let movement;
     try {
-      movement = await tx.inventoryMovement.create({ data: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId!, type: MOVEMENT_TYPE[currentRequested.adjustmentType], quantity: currentRequested.delta, unitCost: currentRequested.unitCost, referenceType: `MANUAL_${currentRequested.adjustmentType}`, referenceId: authorization.id, userId: input.executorId, employeeId: currentRequested.employeeId, occurredAt: new Date(), notes: `${currentRequested.adjustmentType}: ${currentAuthorization.reason} | authorizationRequestId=${currentAuthorization.id} | authorizationApprovalId=${approval.id}` } });
+      movement = await tx.inventoryMovement.create({ data: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId!, type: MOVEMENT_TYPE[currentRequested.adjustmentType], quantity: currentRequested.delta, unitCost: currentRequested.unitCost, referenceType: `MANUAL_${currentRequested.adjustmentType}`, referenceId: authorization.id, userId: input.executorId, employeeId: currentRequested.employeeId, occurredAt: executionAt, notes: `${currentRequested.adjustmentType}: ${currentAuthorization.reason} | authorizationRequestId=${currentAuthorization.id} | authorizationApprovalId=${approval.id} | executionAt=${executionAt.toISOString()}` } });
     } catch (error: any) {
       if (error?.code === "P2002") throw new Error("AUTHORIZATION_ALREADY_EXECUTED");
       throw error;
     }
-    await tx.auditLog.create({ data: { organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId, userId: input.executorId, action: `INVENTORY_${currentRequested.adjustmentType}`, entityType: "InventoryBalance", entityId: currentAuthorization.entityId, beforeData: { quantity: currentQuantity, productId: currentAuthorization.entityId, authorizationRequestId: currentAuthorization.id, authorizationApprovalId: approval.id }, afterData: { quantity: newQuantity, delta: currentRequested.delta, employeeId: currentRequested.employeeId, authorizationRequestId: currentAuthorization.id, authorizationApprovalId: approval.id, inventoryMovementId: movement.id } } });
-    return { branchId: currentAuthorization.branchId, productId: currentAuthorization.entityId, previousQuantity: currentQuantity, newQuantity, delta: currentRequested.delta, adjustmentType: currentRequested.adjustmentType, authorizationRequestId: currentAuthorization.id, authorizationApprovalId: approval.id, inventoryMovementId: movement.id };
+    if (!movement?.id) throw new Error("AUTHORIZATION_TRACE_BROKEN");
+
+    const audit = await tx.auditLog.create({ data: { organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId, userId: input.executorId, action: `INVENTORY_${currentRequested.adjustmentType}`, entityType: "InventoryBalance", entityId: currentAuthorization.entityId, beforeData: { quantity: currentQuantity, productId: currentAuthorization.entityId, authorizationRequestId: currentAuthorization.id, authorizationApprovalId: approval.id }, afterData: { quantity: newQuantity, delta: currentRequested.delta, employeeId: currentRequested.employeeId, authorizationRequestId: currentAuthorization.id, authorizationApprovalId: approval.id, inventoryMovementId: movement.id, executionAt: executionAt.toISOString() } } });
+    if (!audit?.id) throw new Error("AUTHORIZATION_TRACE_BROKEN");
+
+    return { branchId: currentAuthorization.branchId, productId: currentAuthorization.entityId, previousQuantity: currentQuantity, newQuantity, delta: currentRequested.delta, adjustmentType: currentRequested.adjustmentType, authorizationRequestId: currentAuthorization.id, authorizationApprovalId: approval.id, inventoryMovementId: movement.id, auditLogId: audit.id, executionAt };
   });
 }
