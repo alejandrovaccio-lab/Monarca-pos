@@ -148,6 +148,13 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     if (executor.organizationId !== currentAuthorization.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
     if (currentAuthorization.branchId && !executor.branchAccess.some(({ branchId }) => branchId === currentAuthorization.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
+    const approval = await tx.authorizationApproval.findFirst({
+      where: { authorizationRequestId: currentAuthorization.id, decision: "APPROVED" },
+      orderBy: { approvedAt: "desc" },
+      select: { id: true, approverId: true, decision: true },
+    });
+    if (!approval || approval.decision !== "APPROVED") throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+
     const existing = await tx.purchase.findUnique({ where: { id: currentRequested.purchaseId } });
     if (existing) throw new Error("PURCHASE_ALREADY_EXECUTED");
     const currentPurchasedAt = new Date(currentRequested.purchasedAt);
