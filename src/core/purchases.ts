@@ -5,15 +5,7 @@ import { APPROVER_ROLES, authorizationIntegrityHash, canApproveAuthorization, re
 
 export type PurchaseRequestItem = { productId: string; quantity: number; unitCost: number; taxRate?: number };
 
-type RequestedPurchaseData = {
-  purchaseId: string;
-  branchId: string;
-  supplierId: string;
-  folio: string;
-  employeeId: string;
-  purchasedAt: string;
-  items: PurchaseRequestItem[];
-};
+type RequestedPurchaseData = { purchaseId: string; branchId: string; supplierId: string; folio: string; employeeId: string; purchasedAt: string; items: PurchaseRequestItem[] };
 
 const MAX_PURCHASE_FOLIO_LENGTH = 128;
 const MAX_PURCHASE_IDENTIFIER_LENGTH = 128;
@@ -32,11 +24,7 @@ function validateItems(items: PurchaseRequestItem[]) {
     if (item.taxRate !== undefined && (!Number.isFinite(item.taxRate) || item.taxRate < 0)) throw new Error("PURCHASE_TAX_RATE_INVALID");
   }
 }
-
-function validPurchaseIdentifier(value: unknown) {
-  return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_PURCHASE_IDENTIFIER_LENGTH;
-}
-
+function validPurchaseIdentifier(value: unknown) { return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_PURCHASE_IDENTIFIER_LENGTH; }
 function validPurchaseItem(value: unknown): value is PurchaseRequestItem {
   if (!value || typeof value !== "object") return false;
   const item = value as { productId?: unknown; quantity?: unknown; unitCost?: unknown; taxRate?: unknown };
@@ -46,11 +34,7 @@ function validPurchaseItem(value: unknown): value is PurchaseRequestItem {
   if (item.taxRate !== undefined && (typeof item.taxRate !== "number" || !Number.isFinite(item.taxRate) || item.taxRate < 0 || item.taxRate > MAX_PURCHASE_TAX_RATE)) return false;
   return true;
 }
-
-function validPurchasedAt(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_PURCHASED_AT_LENGTH && !Number.isNaN(new Date(value).getTime());
-}
-
+function validPurchasedAt(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_PURCHASED_AT_LENGTH && !Number.isNaN(new Date(value).getTime()); }
 function validRequestedPurchaseData(value: unknown): value is RequestedPurchaseData {
   if (!value || typeof value !== "object") return false;
   const requested = value as { purchaseId?: unknown; branchId?: unknown; supplierId?: unknown; folio?: unknown; employeeId?: unknown; purchasedAt?: unknown; items?: unknown };
@@ -114,7 +98,8 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     if (currentAuthorization.branchId && !executor.branchAccess.some(({ branchId }) => branchId === currentAuthorization.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
     const approval = await tx.authorizationApproval.findFirst({ where: { authorizationRequestId: currentAuthorization.id, decision: "APPROVED" }, orderBy: { approvedAt: "desc" }, select: { id: true, approverId: true, decision: true } });
-    if (!approval || approval.decision !== "APPROVED" || approval.approverId !== input.executorId) throw new Error("AUTHORIZATION_APPROVER_MISMATCH");
+    if (!approval || approval.decision !== "APPROVED") throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    if (approval.approverId !== input.executorId) throw new Error("AUTHORIZATION_APPROVER_MISMATCH");
 
     const existing = await tx.purchase.findUnique({ where: { id: currentRequested.purchaseId } });
     if (existing) throw new Error("PURCHASE_ALREADY_EXECUTED");
