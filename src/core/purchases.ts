@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { APPROVER_ROLES, authorizationIntegrityHash, canApproveAuthorization, requestAuthorization } from "./authorization";
 
@@ -176,5 +177,5 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     }
     await tx.auditLog.create({ data: { organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId, userId: input.executorId, action: "PURCHASE_RECEIVED", entityType: "Purchase", entityId: purchase.id, beforeData: { inventoryChanged: false }, afterData: { purchaseId: purchase.id, supplierId: currentRequested.supplierId, folio: currentFolio, employeeId: currentRequested.employeeId, items: currentRequested.items, authorizationRequestId: currentAuthorization.id } } });
     return purchase;
-  });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
