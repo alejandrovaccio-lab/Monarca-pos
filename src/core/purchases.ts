@@ -100,6 +100,9 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     const approval = await tx.authorizationApproval.findFirst({ where: { authorizationRequestId: currentAuthorization.id }, orderBy: { approvedAt: "desc" }, select: { id: true, approverId: true, decision: true, approvedAt: true } });
     if (!approval || approval.decision !== "APPROVED") throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     if (approval.approverId !== input.executorId) throw new Error("AUTHORIZATION_APPROVER_MISMATCH");
+    if (!(currentAuthorization.requestedAt instanceof Date) || Number.isNaN(currentAuthorization.requestedAt.getTime())) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    if (currentAuthorization.resolvedAt !== null && currentAuthorization.resolvedAt !== undefined && (!(currentAuthorization.resolvedAt instanceof Date) || Number.isNaN(currentAuthorization.resolvedAt.getTime()))) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    if (!(approval.approvedAt instanceof Date) || Number.isNaN(approval.approvedAt.getTime())) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     const requestedAt = currentAuthorization.requestedAt.getTime();
     const resolvedAt = currentAuthorization.resolvedAt?.getTime();
     const approvedAt = approval.approvedAt.getTime();
@@ -132,7 +135,7 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
       await tx.inventoryMovement.create({ data: { branchId: currentAuthorization.branchId!, productId: item.productId, type: "PURCHASE", quantity: item.quantity, unitCost: item.unitCost, referenceType: "PURCHASE", referenceId: purchase.id, userId: input.executorId, employeeId: currentRequested.employeeId, occurredAt: currentPurchasedAt, notes: `Compra ${currentFolio}: ${currentAuthorization.reason}` } });
       await tx.productCost.create({ data: { productId: item.productId, cost: item.unitCost, source: `PURCHASE:${purchase.id}`, effectiveAt: currentPurchasedAt } });
     }
-    await tx.auditLog.create({ data: { organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId, userId: input.executorId, action: "PURCHASE_RECEIVED", entityType: "Purchase", entityId: purchase.id, beforeData: { inventoryChanged: false }, afterData: { purchaseId: purchase.id, supplierId: currentRequested.supplierId, folio: currentFolio, employeeId: currentRequested.employeeId, items: currentRequested.items, authorizationRequestId: currentAuthorization.id, approvalId: approval.id, approverId: approval.approverId } } });
+    await tx.auditLog.create({ data: { organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId, userId: input.executorId, action: "PURCHASE_RECEIVED", entityType: "Purchase", entityId: purchase.id, beforeData: { inventoryChanged: false }, afterData: { purchaseId: purchase.id, supplierId: currentRequested.supplierId, folio: currentFolio, employeeId: currentRequested.employeeId, items: currentRequested.items, authorizationRequestId: currentAuthorization.id, approvalId: approval.id, approverId: approval.approverId } });
     return purchase;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
