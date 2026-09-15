@@ -9,6 +9,7 @@ vi.mock("../src/lib/prisma", () => ({
     inventoryBalance: { findUnique: vi.fn(), upsert: vi.fn() },
     inventoryMovement: { create: vi.fn(), findFirst: vi.fn() },
     authorizationRequest: { findUnique: vi.fn(), create: vi.fn() },
+    authorizationApproval: { findFirst: vi.fn() },
     auditLog: { create: vi.fn() },
     $transaction: vi.fn(),
   },
@@ -111,6 +112,12 @@ describe("inventory adjustment authorization", () => {
   function configureExecutionMocks(existingMovement: unknown = null) {
     const currentAuthorization = approvedRequest();
     const currentAuthorizationFindUnique = vi.fn().mockResolvedValue(currentAuthorization);
+    const authorizationApprovalFindFirst = vi.fn().mockResolvedValue({
+      id: "approval-1",
+      approverId: "manager-1",
+      decision: "APPROVED",
+      approvedAt: new Date("2026-09-15T18:00:00.000Z"),
+    });
 
     db.user.findUnique.mockImplementation(({ where }: any) => {
       if (where?.id === "manager-1") {
@@ -125,10 +132,11 @@ describe("inventory adjustment authorization", () => {
       return Promise.resolve(null);
     });
     db.authorizationRequest.findUnique.mockResolvedValue(approvedRequest());
+    db.authorizationApproval.findFirst.mockImplementation(authorizationApprovalFindFirst);
     const employeeFindUnique = vi.fn().mockResolvedValue({ organizationId: "org-1" });
     const balanceFindUnique = vi.fn().mockResolvedValue({ quantity: 10 });
     const upsert = vi.fn().mockResolvedValue({});
-    const movement = vi.fn().mockResolvedValue({});
+    const movement = vi.fn().mockResolvedValue({ id: "movement-1" });
     const findFirst = vi.fn().mockResolvedValue(existingMovement);
     const audit = vi.fn().mockResolvedValue({});
     const executorFindUnique = vi.fn().mockResolvedValue({
@@ -141,6 +149,7 @@ describe("inventory adjustment authorization", () => {
       $queryRaw: vi.fn().mockResolvedValue([]),
       user: { findUnique: executorFindUnique },
       authorizationRequest: { findUnique: currentAuthorizationFindUnique },
+      authorizationApproval: { findFirst: authorizationApprovalFindFirst },
       employee: { findUnique: employeeFindUnique },
       inventoryBalance: { findUnique: balanceFindUnique, upsert },
       inventoryMovement: { findFirst, create: movement },
@@ -154,6 +163,7 @@ describe("inventory adjustment authorization", () => {
       balanceFindUnique,
       currentAuthorizationFindUnique,
       executorFindUnique,
+      authorizationApprovalFindFirst,
     };
   }
 
