@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "../lib/prisma";
-import { authorizationIntegrityHash, canApproveAuthorization, requestAuthorization } from "./authorization";
+import { APPROVER_ROLES, authorizationIntegrityHash, canApproveAuthorization, requestAuthorization } from "./authorization";
 
 export type PurchaseRequestItem = { productId: string; quantity: number; unitCost: number; taxRate?: number };
 
@@ -141,8 +141,9 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     if (!validRequestedPurchaseData(currentRequested)) throw new Error("AUTHORIZATION_TARGET_INVALID");
     if (currentRequested.purchaseId !== currentAuthorization.entityId || currentRequested.branchId !== currentAuthorization.branchId) throw new Error("AUTHORIZATION_TARGET_INVALID");
 
-    const executor = await tx.user.findUnique({ where: { id: input.executorId }, select: { organizationId: true, status: true, branchAccess: { select: { branchId: true } } } });
+    const executor = await tx.user.findUnique({ where: { id: input.executorId }, select: { organizationId: true, status: true, branchAccess: { select: { branchId: true } }, roles: { select: { role: { select: { name: true } } } } } });
     if (!executor || executor.status === "INACTIVE") throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
+    if (!executor.roles.some(({ role }) => APPROVER_ROLES.has(role.name))) throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
     if (executor.organizationId !== currentAuthorization.organizationId) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
     if (currentAuthorization.branchId && !executor.branchAccess.some(({ branchId }) => branchId === currentAuthorization.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
