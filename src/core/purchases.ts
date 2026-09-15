@@ -99,11 +99,11 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
 
     const approval = await tx.authorizationApproval.findFirst({ where: { authorizationRequestId: currentAuthorization.id }, orderBy: { approvedAt: "desc" }, select: { id: true, approverId: true, decision: true, approvedAt: true } });
     if (!approval || approval.decision !== "APPROVED") throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    if (approval.approverId !== input.executorId) throw new Error("AUTHORIZATION_APPROVER_MISMATCH");
     const requestedAt = currentAuthorization.requestedAt.getTime();
     const resolvedAt = currentAuthorization.resolvedAt?.getTime();
     const approvedAt = approval.approvedAt.getTime();
     if (approvedAt < requestedAt || (resolvedAt !== undefined && approvedAt > resolvedAt)) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
-    if (approval.approverId !== input.executorId) throw new Error("AUTHORIZATION_APPROVER_MISMATCH");
 
     const existing = await tx.purchase.findUnique({ where: { id: currentRequested.purchaseId } });
     if (existing) throw new Error("PURCHASE_ALREADY_EXECUTED");
