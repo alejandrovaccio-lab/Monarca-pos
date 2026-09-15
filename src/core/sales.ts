@@ -129,11 +129,11 @@ export async function executeApprovedSaleChange(input: {
           type: "ADJUSTMENT",
           quantity: item.quantity,
           unitCost: item.costSnapshot,
-          referenceType: status === "CANCELLED" ? "SALE_CANCEL" : "SALE_REFUND",
-          referenceId: sale.id,
+          referenceType: status === "CANCELLED" ? "SALE_CANCEL_ITEM" : "SALE_REFUND_ITEM",
+          referenceId: item.id,
           userId: input.executorId,
           occurredAt: new Date(),
-          notes: `Reversión de inventario por ${status === "CANCELLED" ? "cancelación" : "devolución"} autorizada. Solicitud ${currentAuthorization.id}.`,
+          notes: `Reversión de inventario por ${status === "CANCELLED" ? "cancelación" : "devolución"} autorizada. Venta ${sale.id}. Solicitud ${currentAuthorization.id}.`,
         },
       });
     }
