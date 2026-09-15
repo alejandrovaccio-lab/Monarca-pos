@@ -171,7 +171,14 @@ export async function resolveAuthorization(input: {
       throw error;
     }
 
-    const approval = await tx.authorizationApproval.create({ data: { authorizationRequestId: currentRequest.id, approverId: input.approverId, decision: input.decision, notes } });
+    let approval;
+    try {
+      approval = await tx.authorizationApproval.create({ data: { authorizationRequestId: currentRequest.id, approverId: input.approverId, decision: input.decision, notes } });
+    } catch (error: any) {
+      if (error?.code === "P2002") throw new Error("AUTHORIZATION_ALREADY_RESOLVED");
+      throw error;
+    }
+
     await tx.auditLog.create({ data: {
       organizationId: currentRequest.organizationId, branchId: currentRequest.branchId, userId: input.approverId,
       action: `AUTHORIZATION_${input.decision}`, entityType: currentRequest.entityType, entityId: currentRequest.entityId,
