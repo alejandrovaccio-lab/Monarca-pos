@@ -93,6 +93,20 @@ export async function executeApprovedSaleChange(input: {
     }
     if (sale.status !== "COMPLETED") throw new Error("SALE_ALREADY_CHANGED");
 
+    const productIds = [...new Set(sale.items.map((item) => item.productId))];
+    const branchProducts = await tx.branchProduct.findMany({
+      where: {
+        branchId: sale.branchId,
+        productId: { in: productIds },
+        isEnabled: true,
+      },
+      select: { productId: true },
+    });
+    const enabledProductIds = new Set(branchProducts.map(({ productId }) => productId));
+    if (enabledProductIds.size !== productIds.length) {
+      throw new Error("BRANCH_PRODUCT_SCOPE_FORBIDDEN");
+    }
+
     const status = targetStatusFor(currentAuthorization.type);
 
     const changed = await tx.sale.updateMany({
