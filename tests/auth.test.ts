@@ -4,7 +4,7 @@ vi.mock("../src/lib/prisma", () => ({
   prisma: {
     user: { findFirst: vi.fn() },
     authCredential: { findUnique: vi.fn() },
-    userSession: { create: vi.fn(), update: vi.fn(), findUnique: vi.fn() }
+    userSession: { create: vi.fn(), update: vi.fn(), updateMany: vi.fn(), findUnique: vi.fn() }
   }
 }));
 
@@ -29,6 +29,7 @@ beforeEach(() => {
     revokedAt: null
   });
   db.userSession.update.mockResolvedValue({ id: "session-1", revokedAt: new Date() });
+  db.userSession.updateMany.mockResolvedValue({ count: 1 });
 });
 
 const activeUser = (
@@ -130,21 +131,35 @@ describe("authentication", () => {
     expect(result).toMatchObject({ ok: false, reason: "INVALID_CREDENTIALS" });
   });
 
-  it("revokes a session on logout", async () => {
-    await logout("session-token");
+  it("revokes a session atomically on logout", async () => {
+    const result = await logout("session-token");
+
+    expect(result).toMatchObject({ id: "session-1", revokedAt: expect.any(Date) });
     expect(db.userSession.findUnique).toHaveBeenCalledOnce();
-    expect(db.userSession.update).toHaveBeenCalledOnce();
-    expect(db.userSession.update.mock.calls[0][0]).toMatchObject({
-      where: { id: "session-1" },
+    expect(db.userSession.updateMany).toHaveBeenCalledOnce();
+    expect(db.userSession.updateMany.mock.calls[0][0]).toMatchObject({
+      where: {
+        id: "session-1",
+        revokedAt: null,
+        expiresAt: { gt: expect.any(Date) }
+      },
       data: { revokedAt: expect.any(Date) }
     });
+    expect(db.userSession.update).not.toHaveBeenCalled();
+  });
+
+  it("returns null when a concurrent logout already revoked the session", async () => {
+    db.userSession.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(logout("session-token")).resolves.toBeNull();
+    expect(db.userSession.updateMany).toHaveBeenCalledOnce();
   });
 
   it("returns null when logout receives an unknown session", async () => {
     db.userSession.findUnique.mockResolvedValueOnce(null);
 
     await expect(logout("unknown-token")).resolves.toBeNull();
-    expect(db.userSession.update).not.toHaveBeenCalled();
+    expect(db.userSession.updateMany).not.toHaveBeenCalled();
   });
 
   it("returns null when logout receives an already revoked session", async () => {
@@ -155,7 +170,7 @@ describe("authentication", () => {
     });
 
     await expect(logout("revoked-token")).resolves.toBeNull();
-    expect(db.userSession.update).not.toHaveBeenCalled();
+    expect(db.userSession.updateMany).not.toHaveBeenCalled();
   });
 
   it("returns null when logout receives an expired session", async () => {
@@ -166,6 +181,6 @@ describe("authentication", () => {
     });
 
     await expect(logout("expired-token")).resolves.toBeNull();
-    expect(db.userSession.update).not.toHaveBeenCalled();
+    expect(db.userSession.updateMany).not.toHaveBeenCalled();
   });
 });
