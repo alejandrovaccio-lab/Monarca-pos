@@ -17,7 +17,8 @@ function configureExecutionMocks(){
  const request=approvedRequest();
  const currentAuthorizationFindUnique=vi.fn().mockResolvedValue(request);
  const branchProductFindUnique=vi.fn().mockResolvedValue({isEnabled:true,product:{organizationId:"org-1"}});
- const executorFindUnique=vi.fn().mockResolvedValue({id:"manager-1",organizationId:"org-1",status:"ACTIVE",branchAccess:[{branchId:"branch-1"}]});
+ const executor={id:"manager-1",organizationId:"org-1",status:"ACTIVE",branchAccess:[{branchId:"branch-1"}]};
+ const executorFindUnique=vi.fn().mockResolvedValue(executor);
  const approvalFindFirst=vi.fn().mockResolvedValue({id:"approval-1",approverId:"manager-1",decision:"APPROVED",approvedAt:new Date("2026-09-15T18:00:00.000Z")});
  const employeeFindUnique=vi.fn().mockResolvedValue({organizationId:"org-1"});
  const balanceFindUnique=vi.fn().mockResolvedValue({quantity:12});
@@ -26,6 +27,7 @@ function configureExecutionMocks(){
  const movementCreate=vi.fn().mockResolvedValue({id:"movement-1"});
  const auditCreate=vi.fn().mockResolvedValue({id:"audit-1"});
  db.authorizationRequest.findUnique.mockResolvedValue(request);
+ db.user.findUnique.mockResolvedValue(executor);
  db.$transaction.mockImplementation(async (callback:any)=>callback({
   $queryRaw:vi.fn().mockResolvedValue([]),
   authorizationRequest:{findUnique:currentAuthorizationFindUnique},
