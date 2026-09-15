@@ -8,6 +8,7 @@ vi.mock("../src/lib/prisma", () => ({
     supplier: { findUnique: vi.fn() },
     product: { findMany: vi.fn() },
     authorizationRequest: { findUnique: vi.fn() },
+    authorizationApproval: { findFirst: vi.fn() },
     purchase: { findUnique: vi.fn(), create: vi.fn() },
     $transaction: vi.fn(),
   },
@@ -150,7 +151,48 @@ describe("purchase receipts", () => {
       .rejects.toThrow("AUTHORIZATION_APPROVER_REQUIRED");
   });
 
-  it("allows execution when the executor retains an approver role inside the transaction", async () => {
+  it("rejects execution when an approved authorization has no persisted approval record", async () => {
+    canApproveAuthorization.mockResolvedValue(true);
+    const authorization = {
+      id: "auth-no-approval", status: "APPROVED", organizationId: "org-1", branchId: "branch-1",
+      requestedById: "requester-1", type: "OTHER", entityType: "Purchase", entityId: "purchase-no-approval",
+      reason: "Resurtido", beforeData: null, integrityHash: "test-integrity-hash",
+      requestedData: { purchaseId: "purchase-no-approval", branchId: "branch-1", supplierId: "supplier-1", folio: "FAC-103", employeeId: "emp-1", purchasedAt: new Date().toISOString(), items: [{ productId: "product-1", quantity: 1, unitCost: 10 }] },
+    };
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization);
+    const tx = {
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
+      user: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1", status: "ACTIVE", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] }) },
+      authorizationApproval: { findFirst: vi.fn().mockResolvedValue(null) },
+    };
+    db.$transaction.mockImplementation(async (callback: any) => callback(tx));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: authorization.id, executorId: "user-1" }))
+      .rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(tx.authorizationApproval.findFirst).toHaveBeenCalledOnce();
+  });
+
+  it("rejects execution when the persisted approval is not APPROVED", async () => {
+    canApproveAuthorization.mockResolvedValue(true);
+    const authorization = {
+      id: "auth-rejected-approval", status: "APPROVED", organizationId: "org-1", branchId: "branch-1",
+      requestedById: "requester-1", type: "OTHER", entityType: "Purchase", entityId: "purchase-rejected-approval",
+      reason: "Resurtido", beforeData: null, integrityHash: "test-integrity-hash",
+      requestedData: { purchaseId: "purchase-rejected-approval", branchId: "branch-1", supplierId: "supplier-1", folio: "FAC-104", employeeId: "emp-1", purchasedAt: new Date().toISOString(), items: [{ productId: "product-1", quantity: 1, unitCost: 10 }] },
+    };
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization);
+    const tx = {
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
+      user: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1", status: "ACTIVE", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] }) },
+      authorizationApproval: { findFirst: vi.fn().mockResolvedValue({ id: "approval-1", approverId: "approver-1", decision: "REJECTED" }) },
+    };
+    db.$transaction.mockImplementation(async (callback: any) => callback(tx));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: authorization.id, executorId: "user-1" }))
+      .rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+  });
+
+  it("allows execution when the executor retains an approver role and approval provenance is valid", async () => {
     canApproveAuthorization.mockResolvedValue(true);
     const authorization = {
       id: "auth-role-valid", status: "APPROVED", organizationId: "org-1", branchId: "branch-1",
@@ -162,6 +204,7 @@ describe("purchase receipts", () => {
     const tx = {
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
       user: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1", status: "ACTIVE", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] }) },
+      authorizationApproval: { findFirst: vi.fn().mockResolvedValue({ id: "approval-1", approverId: "approver-1", decision: "APPROVED" }) },
       purchase: { findUnique: vi.fn().mockResolvedValue({ id: "existing-purchase" }) },
     };
     db.$transaction.mockImplementation(async (callback: any) => callback(tx));
@@ -169,6 +212,7 @@ describe("purchase receipts", () => {
     await expect(executeApprovedPurchaseReceipt({ requestId: authorization.id, executorId: "user-1" }))
       .rejects.toThrow("PURCHASE_ALREADY_EXECUTED");
     expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: "Serializable" });
+    expect(tx.authorizationApproval.findFirst).toHaveBeenCalledOnce();
     expect(tx.user.findUnique).toHaveBeenCalledOnce();
     expect(tx.purchase.findUnique).toHaveBeenCalledOnce();
   });
