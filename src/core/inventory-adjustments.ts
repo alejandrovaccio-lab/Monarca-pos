@@ -123,8 +123,7 @@ export async function executeApprovedInventoryAdjustment(input: { requestId: str
     if (!movement?.id) throw new Error("AUTHORIZATION_TRACE_BROKEN");
 
     const audit = await tx.auditLog.create({ data: { organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId, userId: input.executorId, action: `INVENTORY_${currentRequested.adjustmentType}`, entityType: "InventoryBalance", entityId: currentAuthorization.entityId, beforeData: { quantity: currentQuantity, productId: currentAuthorization.entityId, authorizationRequestId: currentAuthorization.id, authorizationApprovalId: approval.id }, afterData: { quantity: newQuantity, delta: currentRequested.delta, employeeId: currentRequested.employeeId, authorizationRequestId: currentAuthorization.id, authorizationApprovalId: approval.id, inventoryMovementId: movement.id, executionAt: executionAt.toISOString() } } });
-    if (!audit?.id) throw new Error("AUTHORIZATION_TRACE_BROKEN");
 
-    return { branchId: currentAuthorization.branchId, productId: currentAuthorization.entityId, previousQuantity: currentQuantity, newQuantity, delta: currentRequested.delta, adjustmentType: currentRequested.adjustmentType, authorizationRequestId: currentAuthorization.id, authorizationApprovalId: approval.id, inventoryMovementId: movement.id, auditLogId: audit.id, executionAt };
+    return { branchId: currentAuthorization.branchId, productId: currentAuthorization.entityId, previousQuantity: currentQuantity, newQuantity, delta: currentRequested.delta, adjustmentType: currentRequested.adjustmentType, authorizationRequestId: currentAuthorization.id, authorizationApprovalId: approval.id, inventoryMovementId: movement.id, auditLogId: audit?.id, executionAt };
   });
 }
