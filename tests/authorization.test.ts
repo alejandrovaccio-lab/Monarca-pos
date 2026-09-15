@@ -15,7 +15,7 @@ vi.mock("../src/lib/prisma", () => ({
 }));
 
 import { prisma } from "../src/lib/prisma";
-import { canApproveAuthorization, requestAuthorization, resolveAuthorization } from "../src/core/authorization";
+import { authorizationIntegrityHash, canApproveAuthorization, requestAuthorization, resolveAuthorization } from "../src/core/authorization";
 import { requireAuthorizationApprover, requirePermission } from "../src/middleware/authorization";
 
 const db = prisma as any;
@@ -33,6 +33,37 @@ function activeApprover(overrides: Record<string, unknown> = {}) {
     roles: [{ role: { name: "GERENTE" } }],
     branchAccess: [{ branchId: "branch-1" }],
     ...overrides
+  };
+}
+
+function authorizationFixture(overrides: Record<string, unknown> = {}) {
+  const request = {
+    id: "auth-1",
+    organizationId: "org-1",
+    branchId: "branch-1",
+    requestedById: "cashier-1",
+    status: "PENDING",
+    type: "SALE_CANCEL",
+    reason: "Cancelación solicitada por cliente",
+    entityType: "Sale",
+    entityId: "sale-1",
+    beforeData: { status: "COMPLETED" },
+    requestedData: { status: "CANCELLED" },
+    ...overrides
+  };
+  return {
+    ...request,
+    integrityHash: authorizationIntegrityHash({
+      organizationId: request.organizationId,
+      branchId: request.branchId,
+      requestedById: request.requestedById,
+      type: request.type,
+      reason: request.reason,
+      entityType: request.entityType,
+      entityId: request.entityId,
+      beforeData: request.beforeData,
+      requestedData: request.requestedData
+    })
   };
 }
 
@@ -216,12 +247,20 @@ describe("role authorization", () => {
     expect(db.authorizationRequest.update).not.toHaveBeenCalled();
   });
 
+  it("rejects a pending authorization with no integrity hash", async () => {
+    db.user.findUnique.mockResolvedValue(activeApprover());
+    db.authorizationRequest.findUnique.mockResolvedValue(authorizationFixture({ integrityHash: undefined }));
+    transactionMock();
+
+    await expect(resolveAuthorization({ requestId: "auth-1", approverId: "manager-1", decision: "APPROVED" }))
+      .rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.authorizationRequest.update).not.toHaveBeenCalled();
+    expect(db.authorizationApproval.create).not.toHaveBeenCalled();
+  });
+
   it("allows an approver with matching organization and branch access", async () => {
     db.user.findUnique.mockResolvedValue(activeApprover());
-    db.authorizationRequest.findUnique.mockResolvedValue({
-      id: "auth-1", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-1", status: "PENDING",
-      entityType: "Sale", entityId: "sale-1", beforeData: { status: "COMPLETED" }, requestedData: { status: "CANCELLED" }
-    });
+    db.authorizationRequest.findUnique.mockResolvedValue(authorizationFixture());
     db.authorizationRequest.update.mockResolvedValue({ id: "auth-1", status: "APPROVED", resolvedAt: new Date() });
     db.authorizationApproval.create.mockResolvedValue({ id: "approval-1", decision: "APPROVED" });
     db.auditLog.create.mockResolvedValue({ id: "audit-1" });
@@ -243,10 +282,7 @@ describe("role authorization", () => {
 
   it("approves a request, records the approval, resolves the request, and audits it", async () => {
     db.user.findUnique.mockResolvedValue(activeApprover());
-    db.authorizationRequest.findUnique.mockResolvedValue({
-      id: "auth-1", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-1", status: "PENDING",
-      entityType: "Sale", entityId: "sale-1", beforeData: { status: "COMPLETED" }, requestedData: { status: "CANCELLED" }
-    });
+    db.authorizationRequest.findUnique.mockResolvedValue(authorizationFixture());
     db.authorizationRequest.update.mockResolvedValue({ id: "auth-1", status: "APPROVED", resolvedAt: new Date() });
     db.authorizationApproval.create.mockResolvedValue({ id: "approval-1", decision: "APPROVED" });
     db.auditLog.create.mockResolvedValue({ id: "audit-1" });
@@ -271,10 +307,7 @@ describe("role authorization", () => {
 
   it("supports rejection with notes and records the rejection audit", async () => {
     db.user.findUnique.mockResolvedValue(activeApprover({ roles: [{ role: { name: "ENCARGADO_TIENDA" } }] }));
-    db.authorizationRequest.findUnique.mockResolvedValue({
-      id: "auth-2", organizationId: "org-1", branchId: "branch-1", requestedById: "cashier-2", status: "PENDING",
-      entityType: "Sale", entityId: "sale-2", beforeData: { status: "COMPLETED" }, requestedData: { status: "REFUNDED" }
-    });
+    db.authorizationRequest.findUnique.mockResolvedValue(authorizationFixture({ id: "auth-2", requestedById: "cashier-2", entityId: "sale-2", requestedData: { status: "REFUNDED" } }));
     db.authorizationRequest.update.mockResolvedValue({ id: "auth-2", status: "REJECTED", resolvedAt: new Date() });
     db.authorizationApproval.create.mockResolvedValue({ id: "approval-2", decision: "REJECTED" });
     db.auditLog.create.mockResolvedValue({ id: "audit-2" });
