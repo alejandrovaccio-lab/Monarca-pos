@@ -20,24 +20,31 @@ function isValidIdentifier(value: unknown): value is string {
 export async function requireSession(token: string) {
   if (!isValidToken(token)) return null;
 
+  const now = new Date();
   const session = await prisma.userSession.findUnique({
     where: { tokenHash: hashToken(token) },
     select: { id: true, expiresAt: true, revokedAt: true }
   });
 
-  if (!session || session.revokedAt || session.expiresAt <= new Date()) {
+  if (!session || session.revokedAt || session.expiresAt <= now) {
     return null;
   }
 
   const context = await getSessionContext(session.id);
-  if (!context || context.user.status === "INACTIVE") {
+  if (!context || context.user.status !== "ACTIVE") {
     return null;
   }
 
-  await prisma.userSession.update({
-    where: { id: session.id },
-    data: { lastSeenAt: new Date() }
+  const touch = await prisma.userSession.updateMany({
+    where: {
+      id: session.id,
+      revokedAt: null,
+      expiresAt: { gt: now }
+    },
+    data: { lastSeenAt: now }
   });
+
+  if (touch.count !== 1) return null;
 
   return context;
 }
