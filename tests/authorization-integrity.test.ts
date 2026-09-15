@@ -10,7 +10,7 @@ const { prisma } = vi.hoisted(() => ({
 
 vi.mock("../src/lib/prisma", () => ({ prisma }));
 
-import { resolveAuthorization } from "../src/core/authorization";
+import { authorizationIntegrityHash, resolveAuthorization } from "../src/core/authorization";
 
 const approver = {
   id: "manager-1",
@@ -34,14 +34,19 @@ const request = {
   requestedData: { price: 12 },
 };
 
+const requestWithIntegrity = {
+  ...request,
+  integrityHash: authorizationIntegrityHash(request),
+};
+
 function transactionMock(options: { update?: unknown; approval?: unknown; audit?: unknown; updateError?: unknown; approvalError?: unknown; auditError?: unknown } = {}) {
   const tx = {
     user: { findUnique: vi.fn().mockResolvedValue(approver) },
     authorizationRequest: {
-      findUnique: vi.fn().mockResolvedValue(request),
+      findUnique: vi.fn().mockResolvedValue(requestWithIntegrity),
       update: vi.fn(async () => {
         if (options.updateError) throw options.updateError;
-        return options.update ?? { ...request, status: "APPROVED", resolvedAt: new Date() };
+        return options.update ?? { ...requestWithIntegrity, status: "APPROVED", resolvedAt: new Date() };
       }),
     },
     authorizationApproval: {
@@ -65,7 +70,7 @@ describe("Authorization resolution integrity", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prisma.user.findUnique.mockResolvedValue(approver);
-    prisma.authorizationRequest.findUnique.mockResolvedValue(request);
+    prisma.authorizationRequest.findUnique.mockResolvedValue(requestWithIntegrity);
   });
 
   it("resolves once and creates exactly one approval and audit entry", async () => {
@@ -90,8 +95,8 @@ describe("Authorization resolution integrity", () => {
   it("rejects a second resolution after the request is already resolved", async () => {
     const tx = transactionMock();
     prisma.authorizationRequest.findUnique
-      .mockResolvedValueOnce(request)
-      .mockResolvedValueOnce({ ...request, status: "APPROVED" });
+      .mockResolvedValueOnce(requestWithIntegrity)
+      .mockResolvedValueOnce({ ...requestWithIntegrity, status: "APPROVED" });
 
     await resolveAuthorization({
       requestId: "auth-1",
