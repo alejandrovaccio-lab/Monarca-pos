@@ -13,11 +13,15 @@ vi.mock("../src/lib/prisma", () => ({
   },
 }));
 
-vi.mock("../src/core/authorization", () => ({
-  canApproveAuthorization: vi.fn(),
-  requestAuthorization: vi.fn(),
-  authorizationIntegrityHash: vi.fn(() => "test-integrity-hash"),
-}));
+vi.mock("../src/core/authorization", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/core/authorization")>();
+  return {
+    ...actual,
+    canApproveAuthorization: vi.fn(),
+    requestAuthorization: vi.fn(),
+    authorizationIntegrityHash: vi.fn(() => "test-integrity-hash"),
+  };
+});
 
 import { prisma } from "../src/lib/prisma";
 import { canApproveAuthorization, requestAuthorization } from "../src/core/authorization";
