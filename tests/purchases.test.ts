@@ -83,7 +83,7 @@ describe("purchase receipts", () => {
     db.authorizationRequest.findUnique.mockResolvedValue(authorization);
     const tx = {
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
-      user: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-2", status: "ACTIVE", branchAccess: [{ branchId: "branch-1" }] }) },
+      user: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-2", status: "ACTIVE", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] }) },
     };
     db.$transaction.mockImplementation(async (callback: any) => callback(tx));
     await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "user-1" }))
@@ -102,7 +102,7 @@ describe("purchase receipts", () => {
     db.authorizationRequest.findUnique.mockResolvedValue(authorization);
     const tx = {
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
-      user: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1", status: "ACTIVE", branchAccess: [{ branchId: "branch-2" }] }) },
+      user: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1", status: "ACTIVE", branchAccess: [{ branchId: "branch-2" }], roles: [{ role: { name: "GERENTE" } }] }) },
     };
     db.$transaction.mockImplementation(async (callback: any) => callback(tx));
     await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "user-1" }))
@@ -120,10 +120,51 @@ describe("purchase receipts", () => {
     db.authorizationRequest.findUnique.mockResolvedValue(authorization);
     const tx = {
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
-      user: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1", status: "INACTIVE", branchAccess: [{ branchId: "branch-1" }] }) },
+      user: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1", status: "INACTIVE", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] }) },
     };
     db.$transaction.mockImplementation(async (callback: any) => callback(tx));
     await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "user-1" }))
       .rejects.toThrow("AUTHORIZATION_APPROVER_REQUIRED");
+  });
+
+  it("rejects execution when the executor loses the approver role inside the transaction", async () => {
+    canApproveAuthorization.mockResolvedValue(true);
+    const authorization = {
+      id: "auth-role-revoked", status: "APPROVED", organizationId: "org-1", branchId: "branch-1",
+      requestedById: "requester-1", type: "OTHER", entityType: "Purchase", entityId: "purchase-role-revoked",
+      reason: "Resurtido", beforeData: null, integrityHash: "test-integrity-hash",
+      requestedData: { purchaseId: "purchase-role-revoked", branchId: "branch-1", supplierId: "supplier-1", folio: "FAC-101", employeeId: "emp-1", purchasedAt: new Date().toISOString(), items: [{ productId: "product-1", quantity: 1, unitCost: 10 }] },
+    };
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization);
+    const tx = {
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
+      user: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1", status: "ACTIVE", branchAccess: [{ branchId: "branch-1" }], roles: [] }) },
+    };
+    db.$transaction.mockImplementation(async (callback: any) => callback(tx));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: authorization.id, executorId: "user-1" }))
+      .rejects.toThrow("AUTHORIZATION_APPROVER_REQUIRED");
+  });
+
+  it("allows execution when the executor retains an approver role inside the transaction", async () => {
+    canApproveAuthorization.mockResolvedValue(true);
+    const authorization = {
+      id: "auth-role-valid", status: "APPROVED", organizationId: "org-1", branchId: "branch-1",
+      requestedById: "requester-1", type: "OTHER", entityType: "Purchase", entityId: "purchase-role-valid",
+      reason: "Resurtido", beforeData: null, integrityHash: "test-integrity-hash",
+      requestedData: { purchaseId: "purchase-role-valid", branchId: "branch-1", supplierId: "supplier-1", folio: "FAC-102", employeeId: "emp-1", purchasedAt: new Date().toISOString(), items: [{ productId: "product-1", quantity: 1, unitCost: 10 }] },
+    };
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization);
+    const tx = {
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
+      user: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1", status: "ACTIVE", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] }) },
+      purchase: { findUnique: vi.fn().mockResolvedValue({ id: "existing-purchase" }) },
+    };
+    db.$transaction.mockImplementation(async (callback: any) => callback(tx));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: authorization.id, executorId: "user-1" }))
+      .rejects.toThrow("PURCHASE_ALREADY_EXECUTED");
+    expect(tx.user.findUnique).toHaveBeenCalledOnce();
+    expect(tx.purchase.findUnique).toHaveBeenCalledOnce();
   });
 });
