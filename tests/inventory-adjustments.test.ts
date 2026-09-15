@@ -5,6 +5,7 @@ vi.mock("../src/lib/prisma", () => ({
     user: { findUnique: vi.fn() },
     branch: { findUnique: vi.fn() },
     product: { findUnique: vi.fn() },
+    branchProduct: { findUnique: vi.fn() },
     employee: { findUnique: vi.fn() },
     inventoryBalance: { findUnique: vi.fn(), upsert: vi.fn() },
     inventoryMovement: { create: vi.fn(), findFirst: vi.fn() },
@@ -45,6 +46,7 @@ describe("inventory adjustment authorization", () => {
   it("creates a pending request for a positive entry", async () => {
     db.branch.findUnique.mockResolvedValue({ organizationId: "org-1" });
     db.product.findUnique.mockResolvedValue({ organizationId: "org-1" });
+    db.branchProduct.findUnique.mockResolvedValue({ isEnabled: true, product: { organizationId: "org-1" } });
     db.employee.findUnique.mockResolvedValue({ organizationId: "org-1" });
     db.inventoryBalance.findUnique.mockResolvedValue({ quantity: 10 });
     db.authorizationRequest.create.mockResolvedValue({ id: "request-1", status: "PENDING" });
@@ -61,6 +63,9 @@ describe("inventory adjustment authorization", () => {
     });
 
     expect(result).toEqual({ id: "request-1", status: "PENDING" });
+    expect(db.branchProduct.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      where: { branchId_productId: { branchId: "branch-1", productId: "product-1" } },
+    }));
     expect(db.authorizationRequest.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         type: "INVENTORY_ADJUSTMENT",
@@ -70,9 +75,70 @@ describe("inventory adjustment authorization", () => {
     }));
   });
 
+  it("rejects an adjustment for a product not assigned to the branch", async () => {
+    db.branch.findUnique.mockResolvedValue({ organizationId: "org-1" });
+    db.product.findUnique.mockResolvedValue({ organizationId: "org-1" });
+    db.branchProduct.findUnique.mockResolvedValue(null);
+    db.employee.findUnique.mockResolvedValue({ organizationId: "org-1" });
+    db.inventoryBalance.findUnique.mockResolvedValue({ quantity: 10 });
+
+    await expect(requestInventoryAdjustment({
+      branchId: "branch-1",
+      productId: "product-1",
+      requestedById: "cashier-1",
+      employeeId: "employee-1",
+      type: "ENTRY",
+      quantity: 5,
+      reason: "Producto fuera de catálogo de sucursal",
+    })).rejects.toThrow("BRANCH_PRODUCT_SCOPE_FORBIDDEN");
+
+    expect(db.authorizationRequest.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an adjustment for a disabled branch product", async () => {
+    db.branch.findUnique.mockResolvedValue({ organizationId: "org-1" });
+    db.product.findUnique.mockResolvedValue({ organizationId: "org-1" });
+    db.branchProduct.findUnique.mockResolvedValue({ isEnabled: false, product: { organizationId: "org-1" } });
+    db.employee.findUnique.mockResolvedValue({ organizationId: "org-1" });
+    db.inventoryBalance.findUnique.mockResolvedValue({ quantity: 10 });
+
+    await expect(requestInventoryAdjustment({
+      branchId: "branch-1",
+      productId: "product-1",
+      requestedById: "cashier-1",
+      employeeId: "employee-1",
+      type: "ENTRY",
+      quantity: 5,
+      reason: "Producto deshabilitado",
+    })).rejects.toThrow("BRANCH_PRODUCT_SCOPE_FORBIDDEN");
+
+    expect(db.authorizationRequest.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an adjustment whose branch product points to another organization", async () => {
+    db.branch.findUnique.mockResolvedValue({ organizationId: "org-1" });
+    db.product.findUnique.mockResolvedValue({ organizationId: "org-1" });
+    db.branchProduct.findUnique.mockResolvedValue({ isEnabled: true, product: { organizationId: "org-2" } });
+    db.employee.findUnique.mockResolvedValue({ organizationId: "org-1" });
+    db.inventoryBalance.findUnique.mockResolvedValue({ quantity: 10 });
+
+    await expect(requestInventoryAdjustment({
+      branchId: "branch-1",
+      productId: "product-1",
+      requestedById: "cashier-1",
+      employeeId: "employee-1",
+      type: "ENTRY",
+      quantity: 5,
+      reason: "Asignación inconsistente",
+    })).rejects.toThrow("BRANCH_PRODUCT_SCOPE_FORBIDDEN");
+
+    expect(db.authorizationRequest.create).not.toHaveBeenCalled();
+  });
+
   it("rejects an adjustment that would make inventory negative", async () => {
     db.branch.findUnique.mockResolvedValue({ organizationId: "org-1" });
     db.product.findUnique.mockResolvedValue({ organizationId: "org-1" });
+    db.branchProduct.findUnique.mockResolvedValue({ isEnabled: true, product: { organizationId: "org-1" } });
     db.employee.findUnique.mockResolvedValue({ organizationId: "org-1" });
     db.inventoryBalance.findUnique.mockResolvedValue({ quantity: 2 });
 
@@ -139,17 +205,20 @@ describe("inventory adjustment authorization", () => {
     const movement = vi.fn().mockResolvedValue({ id: "movement-1" });
     const findFirst = vi.fn().mockResolvedValue(existingMovement);
     const audit = vi.fn().mockResolvedValue({});
+    const branchProductFindUnique = vi.fn().mockResolvedValue({ isEnabled: true, product: { organizationId: "org-1" } });
     const executorFindUnique = vi.fn().mockResolvedValue({
       id: "manager-1",
       organizationId: "org-1",
       status: "ACTIVE",
       branchAccess: [{ branchId: "branch-1" }],
     });
+    db.branchProduct.findUnique.mockImplementation(branchProductFindUnique);
     db.$transaction.mockImplementation(async (callback: any) => callback({
       $queryRaw: vi.fn().mockResolvedValue([]),
       user: { findUnique: executorFindUnique },
       authorizationRequest: { findUnique: currentAuthorizationFindUnique },
       authorizationApproval: { findFirst: authorizationApprovalFindFirst },
+      branchProduct: { findUnique: branchProductFindUnique },
       employee: { findUnique: employeeFindUnique },
       inventoryBalance: { findUnique: balanceFindUnique, upsert },
       inventoryMovement: { findFirst, create: movement },
@@ -164,15 +233,19 @@ describe("inventory adjustment authorization", () => {
       currentAuthorizationFindUnique,
       executorFindUnique,
       authorizationApprovalFindFirst,
+      branchProductFindUnique,
     };
   }
 
   it("executes an approved count correction and writes movement and audit", async () => {
-    const { upsert, movement, audit } = configureExecutionMocks();
+    const { upsert, movement, audit, branchProductFindUnique } = configureExecutionMocks();
 
     const result = await executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" });
 
     expect(result).toMatchObject({ previousQuantity: 10, newQuantity: 8, delta: -2, adjustmentType: "COUNT_CORRECTION" });
+    expect(branchProductFindUnique).toHaveBeenCalledWith(expect.objectContaining({
+      where: { branchId_productId: { branchId: "branch-1", productId: "product-1" } },
+    }));
     expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
       create: expect.objectContaining({ quantity: 8 }),
       update: { quantity: 8 },
@@ -181,6 +254,43 @@ describe("inventory adjustment authorization", () => {
       data: expect.objectContaining({ type: "ADJUSTMENT", quantity: -2, employeeId: "employee-1", referenceId: "request-1" }),
     }));
     expect(audit).toHaveBeenCalledOnce();
+  });
+
+  it("rejects execution when the branch product assignment is missing", async () => {
+    const { upsert, movement, audit, branchProductFindUnique } = configureExecutionMocks();
+    branchProductFindUnique.mockResolvedValue(null);
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("BRANCH_PRODUCT_SCOPE_FORBIDDEN");
+
+    expect(branchProductFindUnique).toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("rejects execution when the branch product is disabled", async () => {
+    const { upsert, movement, audit, branchProductFindUnique } = configureExecutionMocks();
+    branchProductFindUnique.mockResolvedValue({ isEnabled: false, product: { organizationId: "org-1" } });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("BRANCH_PRODUCT_SCOPE_FORBIDDEN");
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("rejects execution when the branch product belongs to another organization", async () => {
+    const { upsert, movement, audit, branchProductFindUnique } = configureExecutionMocks();
+    branchProductFindUnique.mockResolvedValue({ isEnabled: true, product: { organizationId: "org-2" } });
+
+    await expect(executeApprovedInventoryAdjustment({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("BRANCH_PRODUCT_SCOPE_FORBIDDEN");
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
   });
 
   it("rejects a pending authorization before changing inventory", async () => {
