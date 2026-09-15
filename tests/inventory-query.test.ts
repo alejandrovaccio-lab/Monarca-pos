@@ -107,4 +107,37 @@ describe("inventory query", () => {
     const result = await getInventoryReplenishment({ branchId: "branch-1" });
     expect(result[0]).toMatchObject({ status: "NO_POLICY", suggestedReplenishment: 0, policy: null });
   });
+
+  it("rejects replenishment for a product that is not assigned to the branch", async () => {
+    db.branch.findUnique.mockResolvedValue({ id: "branch-1", organizationId: "org-1", name: "Centro", code: "CEN" });
+    db.product.findUnique.mockResolvedValue({ id: "product-2", organizationId: "org-1" });
+    db.branchProduct.findUnique.mockResolvedValue(null);
+
+    await expect(getInventoryReplenishment({ branchId: "branch-1", productId: "product-2" })).rejects.toThrow("PRODUCT_BRANCH_INVALID");
+    expect(db.product.findMany).not.toHaveBeenCalled();
+    expect(db.sale.findMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects replenishment for a disabled branch product assignment", async () => {
+    db.branch.findUnique.mockResolvedValue({ id: "branch-1", organizationId: "org-1", name: "Centro", code: "CEN" });
+    db.product.findUnique.mockResolvedValue({ id: "product-2", organizationId: "org-1" });
+    db.branchProduct.findUnique.mockResolvedValue({ isEnabled: false });
+
+    await expect(getInventoryReplenishment({ branchId: "branch-1", productId: "product-2" })).rejects.toThrow("PRODUCT_BRANCH_INVALID");
+  });
+
+  it("lists replenishment products only when assigned and enabled for the branch", async () => {
+    db.branch.findUnique.mockResolvedValue({ id: "branch-1", organizationId: "org-1", name: "Centro", code: "CEN" });
+    db.product.findMany.mockResolvedValue([]);
+    db.inventoryPolicy.findMany.mockResolvedValue([]);
+    db.sale.findMany.mockResolvedValue([]);
+
+    await getInventoryReplenishment({ branchId: "branch-1" });
+    expect(db.product.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        organizationId: "org-1",
+        branchProducts: { some: { branchId: "branch-1", isEnabled: true } },
+      }),
+    }));
+  });
 });
