@@ -100,6 +100,7 @@ export async function createSale(input: {
   if (input.customerId && (!customer || customer.organizationId !== branch.organizationId)) throw new Error("CUSTOMER_INVALID");
 
   const preparedItems: Array<{
+    id: string;
     productId: string;
     productName: string;
     quantity: Prisma.Decimal;
@@ -142,7 +143,7 @@ export async function createSale(input: {
     const tax = taxRate ? subtotal.mul(taxRate) : new Prisma.Decimal(0);
     const lineTotal = roundMoney(subtotal.add(tax));
 
-    preparedItems.push({ productId: product.id, productName: product.name, quantity, unitPrice, discount, taxRate, costSnapshot: product.costs[0]?.cost ?? null, lineTotal });
+    preparedItems.push({ id: randomUUID(), productId: product.id, productName: product.name, quantity, unitPrice, discount, taxRate, costSnapshot: product.costs[0]?.cost ?? null, lineTotal });
   }
 
   const total = roundMoney(preparedItems.reduce((sum, item) => sum.add(item.lineTotal), new Prisma.Decimal(0)));
@@ -159,6 +160,14 @@ export async function createSale(input: {
 
   const execute = async (tx: Prisma.TransactionClient) => {
     for (const item of preparedItems) {
+      const branchProduct = await tx.branchProduct.findUnique({
+        where: { branchId_productId: { branchId: input.branchId, productId: item.productId } },
+        select: { isEnabled: true, product: { select: { organizationId: true, status: true } } },
+      });
+      if (!branchProduct || !branchProduct.isEnabled || branchProduct.product.organizationId !== branch.organizationId || branchProduct.product.status !== "ACTIVE") {
+        throw new Error("PRODUCT_NOT_AVAILABLE_AT_BRANCH");
+      }
+
       const changed = await tx.inventoryBalance.updateMany({
         where: { branchId: input.branchId, productId: item.productId, quantity: { gte: item.quantity } },
         data: { quantity: { decrement: item.quantity } },
@@ -172,11 +181,11 @@ export async function createSale(input: {
           type: "SALE",
           quantity: item.quantity.neg(),
           unitCost: item.costSnapshot,
-          referenceType: "SALE",
-          referenceId: saleId,
+          referenceType: "SALE_ITEM",
+          referenceId: item.id,
           userId: input.cashierId,
           occurredAt: soldAt,
-          notes: `Venta ${folio}`,
+          notes: `Venta ${folio} | saleId=${saleId} | saleItemId=${item.id}`,
         },
       });
     }
@@ -192,7 +201,7 @@ export async function createSale(input: {
         folio,
         status: "COMPLETED",
         soldAt,
-        items: { create: preparedItems.map((item) => ({ productId: item.productId, productName: item.productName, quantity: item.quantity, unitPrice: item.unitPrice, discount: item.discount, taxRate: item.taxRate, costSnapshot: item.costSnapshot })) },
+        items: { create: preparedItems.map((item) => ({ id: item.id, productId: item.productId, productName: item.productName, quantity: item.quantity, unitPrice: item.unitPrice, discount: item.discount, taxRate: item.taxRate, costSnapshot: item.costSnapshot })) },
         payments: { create: preparedPayments },
       },
       include: { items: true, payments: true },
