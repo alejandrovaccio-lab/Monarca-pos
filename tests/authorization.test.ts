@@ -51,20 +51,20 @@ function authorizationFixture(overrides: Record<string, unknown> = {}) {
     requestedData: { status: "CANCELLED" },
     ...overrides
   };
-  return {
-    ...request,
-    integrityHash: authorizationIntegrityHash({
-      organizationId: request.organizationId,
-      branchId: request.branchId,
-      requestedById: request.requestedById,
-      type: request.type,
-      reason: request.reason,
-      entityType: request.entityType,
-      entityId: request.entityId,
-      beforeData: request.beforeData,
-      requestedData: request.requestedData
-    })
-  };
+  const integrityHash = Object.prototype.hasOwnProperty.call(overrides, "integrityHash")
+    ? overrides.integrityHash
+    : authorizationIntegrityHash({
+        organizationId: request.organizationId,
+        branchId: request.branchId,
+        requestedById: request.requestedById,
+        type: request.type,
+        reason: request.reason,
+        entityType: request.entityType,
+        entityId: request.entityId,
+        beforeData: request.beforeData,
+        requestedData: request.requestedData
+      });
+  return { ...request, integrityHash };
 }
 
 describe("role authorization", () => {
