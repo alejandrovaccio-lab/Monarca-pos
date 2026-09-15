@@ -33,7 +33,18 @@ export function authorizationIntegrityHash(input: {
   beforeData?: unknown;
   requestedData?: unknown;
 }) {
-  return createHash("sha256").update(canonicalize(input)).digest("hex");
+  const canonicalInput = {
+    organizationId: input.organizationId,
+    branchId: input.branchId,
+    requestedById: input.requestedById,
+    type: input.type,
+    reason: input.reason,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    beforeData: input.beforeData,
+    requestedData: input.requestedData
+  };
+  return createHash("sha256").update(canonicalize(canonicalInput)).digest("hex");
 }
 
 function assertIdentifier(value: string | undefined, errorCode: string) {
