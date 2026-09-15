@@ -21,6 +21,12 @@ export async function getInventoryReplenishment(input: {
     });
     if (!product) throw new Error("PRODUCT_NOT_FOUND");
     if (product.organizationId !== branch.organizationId) throw new Error("PRODUCT_BRANCH_INVALID");
+
+    const assignment = await prisma.branchProduct.findUnique({
+      where: { branchId_productId: { branchId: input.branchId, productId: input.productId } },
+      select: { isEnabled: true },
+    });
+    if (!assignment?.isEnabled) throw new Error("PRODUCT_BRANCH_INVALID");
   }
 
   const historyDays = Math.min(Math.max(Math.floor(input.days ?? 30), 1), 90);
@@ -32,6 +38,7 @@ export async function getInventoryReplenishment(input: {
       where: {
         organizationId: branch.organizationId,
         status: "ACTIVE",
+        branchProducts: { some: { branchId: input.branchId, isEnabled: true } },
         ...(input.productId ? { id: input.productId } : {}),
       },
       orderBy: { name: "asc" },
