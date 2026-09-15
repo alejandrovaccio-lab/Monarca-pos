@@ -148,10 +148,8 @@ export async function resolveAuthorization(input: {
       beforeData: currentRequest.beforeData,
       requestedData: currentRequest.requestedData
     });
-    if (currentRequest.integrityHash || request.integrityHash) {
-      if (currentRequest.integrityHash !== expectedIntegrityHash || currentRequest.integrityHash !== request.integrityHash) {
-        throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
-      }
+    if (!currentRequest.integrityHash || !request.integrityHash || currentRequest.integrityHash !== expectedIntegrityHash || currentRequest.integrityHash !== request.integrityHash) {
+      throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     }
 
     let claimed;
