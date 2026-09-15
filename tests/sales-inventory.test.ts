@@ -62,10 +62,15 @@ describe("authorized sale inventory restoration", () => {
     const movement = vi.fn().mockResolvedValue({});
     const audit = vi.fn().mockResolvedValue({});
     const queryRaw = vi.fn().mockResolvedValue([]);
+    const branchProductFindMany = vi.fn().mockResolvedValue([
+      { productId: "product-1" },
+      { productId: "product-2" },
+    ]);
     db.$transaction.mockImplementation(async (callback: any) => callback({
       $queryRaw: queryRaw,
       user: { findUnique: vi.fn().mockResolvedValue(executor) },
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
+      branchProduct: { findMany: branchProductFindMany },
       sale: { findUnique: vi.fn().mockResolvedValue(sale), updateMany },
       inventoryBalance: { upsert },
       inventoryMovement: { create: movement },
@@ -76,6 +81,10 @@ describe("authorized sale inventory restoration", () => {
 
     expect(result.status).toBe("CANCELLED");
     expect(queryRaw).toHaveBeenCalledOnce();
+    expect(branchProductFindMany).toHaveBeenCalledWith({
+      where: { branchId: "branch-1", productId: { in: ["product-1", "product-2"] }, isEnabled: true },
+      select: { productId: true },
+    });
     expect(updateMany).toHaveBeenCalledWith({
       where: { id: "sale-1", status: "COMPLETED" },
       data: { status: "CANCELLED" },
@@ -100,10 +109,15 @@ describe("authorized sale inventory restoration", () => {
     const movement = vi.fn().mockResolvedValue({});
     const audit = vi.fn().mockResolvedValue({});
     const queryRaw = vi.fn().mockResolvedValue([]);
+    const branchProductFindMany = vi.fn().mockResolvedValue([
+      { productId: "product-1" },
+      { productId: "product-2" },
+    ]);
     db.$transaction.mockImplementation(async (callback: any) => callback({
       $queryRaw: queryRaw,
       user: { findUnique: vi.fn().mockResolvedValue(executor) },
       authorizationRequest: { findUnique: vi.fn().mockResolvedValue(refundAuthorization) },
+      branchProduct: { findMany: branchProductFindMany },
       sale: { findUnique: vi.fn().mockResolvedValue(sale), updateMany },
       inventoryBalance: { upsert },
       inventoryMovement: { create: movement },
@@ -114,6 +128,7 @@ describe("authorized sale inventory restoration", () => {
 
     expect(result.status).toBe("REFUNDED");
     expect(queryRaw).toHaveBeenCalledOnce();
+    expect(branchProductFindMany).toHaveBeenCalledOnce();
     expect(updateMany).toHaveBeenCalledWith({
       where: { id: "sale-1", status: "COMPLETED" },
       data: { status: "REFUNDED" },
@@ -142,6 +157,62 @@ describe("authorized sale inventory restoration", () => {
         entityId: "sale-1",
       }),
     }));
+  });
+
+  it("rejects restoration when a sold product is not assigned to the branch", async () => {
+    db.user.findUnique.mockResolvedValue(executor);
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization);
+
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const upsert = vi.fn();
+    const movement = vi.fn();
+    const audit = vi.fn();
+    const branchProductFindMany = vi.fn().mockResolvedValue([{ productId: "product-1" }]);
+    db.$transaction.mockImplementationOnce(async (callback: any) => callback({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      user: { findUnique: vi.fn().mockResolvedValue(executor) },
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
+      branchProduct: { findMany: branchProductFindMany },
+      sale: { findUnique: vi.fn().mockResolvedValue(sale), updateMany },
+      inventoryBalance: { upsert },
+      inventoryMovement: { create: movement },
+      auditLog: { create: audit },
+    }));
+
+    await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("BRANCH_PRODUCT_SCOPE_FORBIDDEN");
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("rejects restoration when a sold product is disabled at the branch", async () => {
+    db.user.findUnique.mockResolvedValue(executor);
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization);
+
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const upsert = vi.fn();
+    const movement = vi.fn();
+    const audit = vi.fn();
+    const branchProductFindMany = vi.fn().mockResolvedValue([{ productId: "product-1" }]);
+    db.$transaction.mockImplementationOnce(async (callback: any) => callback({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      user: { findUnique: vi.fn().mockResolvedValue(executor) },
+      authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization) },
+      branchProduct: { findMany: branchProductFindMany },
+      sale: { findUnique: vi.fn().mockResolvedValue(sale), updateMany },
+      inventoryBalance: { upsert },
+      inventoryMovement: { create: movement },
+      auditLog: { create: audit },
+    }));
+
+    await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" }))
+      .rejects.toThrow("BRANCH_PRODUCT_SCOPE_FORBIDDEN");
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+    expect(movement).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
   });
 
   it("does not execute an unapproved request", async () => {
@@ -181,6 +252,7 @@ describe("authorized sale inventory restoration", () => {
         findUnique: vi.fn().mockResolvedValue(sale),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
+      branchProduct: { findMany: vi.fn().mockResolvedValue([{ productId: "product-1" }, { productId: "product-2" }]) },
       inventoryBalance: { upsert: vi.fn() },
       inventoryMovement: { create: vi.fn() },
       auditLog: { create: vi.fn() },
