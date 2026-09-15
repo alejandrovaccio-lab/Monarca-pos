@@ -4,7 +4,7 @@ vi.mock("../src/lib/prisma", () => ({
   prisma: {
     userSession: {
       findUnique: vi.fn(),
-      update: vi.fn()
+      updateMany: vi.fn()
     }
   }
 }));
@@ -39,7 +39,7 @@ const context = (overrides = {}) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  db.userSession.update.mockResolvedValue({});
+  db.userSession.updateMany.mockResolvedValue({ count: 1 });
   db.userSession.findUnique.mockResolvedValue(session());
   getContext.mockResolvedValue(context());
 });
@@ -63,13 +63,21 @@ describe("session middleware", () => {
   it("rejects a session whose user is inactive", async () => {
     getContext.mockResolvedValue(context({ user: { id: "user-1", name: "Colaborador", status: "INACTIVE" } }));
     expect(await requireSession("token")).toBeNull();
-    expect(db.userSession.update).not.toHaveBeenCalled();
+    expect(db.userSession.updateMany).not.toHaveBeenCalled();
   });
 
   it("refreshes lastSeenAt for a valid session", async () => {
     const result = await requireSession("token");
     expect(result).toBeTruthy();
-    expect(db.userSession.update).toHaveBeenCalledOnce();
+    expect(db.userSession.updateMany).toHaveBeenCalledOnce();
+    expect(db.userSession.updateMany.mock.calls[0][0]).toMatchObject({
+      where: {
+        id: "session-1",
+        revokedAt: null,
+        expiresAt: { gt: expect.any(Date) }
+      },
+      data: { lastSeenAt: expect.any(Date) }
+    });
   });
 
   it("requires the requested branch to match the active session branch", async () => {
