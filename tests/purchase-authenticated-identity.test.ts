@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   prisma: {
     userSession: {
       findUnique: vi.fn(),
-      update: vi.fn(),
+      updateMany: vi.fn(),
     },
   },
   getSessionContext: vi.fn(),
@@ -36,7 +36,7 @@ describe("purchase authenticated identity boundary", () => {
       expiresAt: new Date(Date.now() + 60_000),
       revokedAt: null,
     });
-    mocks.prisma.userSession.update.mockResolvedValue({});
+    mocks.prisma.userSession.updateMany.mockResolvedValue({ count: 1 });
     mocks.getSessionContext.mockResolvedValue({
       sessionId: "session-1",
       userId: "authenticated-user",
