@@ -135,7 +135,12 @@ export async function executeApprovedInventoryAdjustment(input: { requestId: str
     if (newQuantity < 0) throw new Error("INVENTORY_NEGATIVE_NOT_ALLOWED");
     if (Number(currentRequested.resultingQuantity) !== newQuantity) throw new Error("INVENTORY_CHANGED_SINCE_REQUEST");
     await tx.inventoryBalance.upsert({ where: { branchId_productId: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId! } }, create: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId!, quantity: newQuantity }, update: { quantity: newQuantity } });
-    await tx.inventoryMovement.create({ data: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId!, type: MOVEMENT_TYPE[currentRequested.adjustmentType], quantity: currentRequested.delta, unitCost: currentRequested.unitCost, referenceType: `MANUAL_${currentRequested.adjustmentType}`, referenceId: authorization.id, userId: input.executorId, employeeId: currentRequested.employeeId, occurredAt: new Date(), notes: `${currentRequested.adjustmentType}: ${currentAuthorization.reason}` } });
+    try {
+      await tx.inventoryMovement.create({ data: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId!, type: MOVEMENT_TYPE[currentRequested.adjustmentType], quantity: currentRequested.delta, unitCost: currentRequested.unitCost, referenceType: `MANUAL_${currentRequested.adjustmentType}`, referenceId: authorization.id, userId: input.executorId, employeeId: currentRequested.employeeId, occurredAt: new Date(), notes: `${currentRequested.adjustmentType}: ${currentAuthorization.reason}` } });
+    } catch (error: any) {
+      if (error?.code === "P2002") throw new Error("AUTHORIZATION_ALREADY_EXECUTED");
+      throw error;
+    }
     await tx.auditLog.create({ data: { organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId, userId: input.executorId, action: `INVENTORY_${currentRequested.adjustmentType}`, entityType: "InventoryBalance", entityId: currentAuthorization.entityId, beforeData: { quantity: currentQuantity, productId: currentAuthorization.entityId }, afterData: { quantity: newQuantity, delta: currentRequested.delta, employeeId: currentRequested.employeeId, authorizationRequestId: authorization.id } } });
     return { branchId: currentAuthorization.branchId, productId: currentAuthorization.entityId, previousQuantity: currentQuantity, newQuantity, delta: currentRequested.delta, adjustmentType: currentRequested.adjustmentType };
   });
