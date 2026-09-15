@@ -47,6 +47,60 @@ export function authorizationIntegrityHash(input: {
   return createHash("sha256").update(canonicalize(canonicalInput)).digest("hex");
 }
 
+export function assertAuthorizationExecution(input: {
+  authorization: {
+    organizationId: string;
+    branchId?: string | null;
+    requestedById: string;
+    type: string;
+    status: string;
+    reason: string;
+    entityType: string;
+    entityId?: string | null;
+    beforeData?: unknown;
+    requestedData?: unknown;
+    integrityHash?: string | null;
+  };
+  organizationId: string;
+  branchId?: string | null;
+  type: string;
+  entityType: string;
+  entityId?: string | null;
+  currentData?: unknown;
+  requestedData?: unknown;
+}) {
+  const authorization = input.authorization;
+  if (authorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
+  if (authorization.organizationId !== input.organizationId || authorization.branchId !== input.branchId) {
+    throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
+  }
+  if (authorization.type !== input.type || authorization.entityType !== input.entityType || authorization.entityId !== input.entityId) {
+    throw new Error("AUTHORIZATION_EXECUTION_MISMATCH");
+  }
+
+  const expectedIntegrityHash = authorizationIntegrityHash({
+    organizationId: authorization.organizationId,
+    branchId: authorization.branchId ?? undefined,
+    requestedById: authorization.requestedById,
+    type: authorization.type,
+    reason: authorization.reason,
+    entityType: authorization.entityType,
+    entityId: authorization.entityId ?? undefined,
+    beforeData: authorization.beforeData,
+    requestedData: authorization.requestedData
+  });
+  if (!authorization.integrityHash || authorization.integrityHash !== expectedIntegrityHash) {
+    throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+  }
+
+  if (input.currentData !== undefined && canonicalize(input.currentData) !== canonicalize(authorization.beforeData)) {
+    throw new Error("AUTHORIZATION_STATE_CHANGED");
+  }
+  if (input.requestedData !== undefined && canonicalize(input.requestedData) !== canonicalize(authorization.requestedData)) {
+    throw new Error("AUTHORIZATION_EXECUTION_MISMATCH");
+  }
+}
+
 function assertIdentifier(value: string | undefined, errorCode: string) {
   if (value !== undefined && (!value || value.length > MAX_AUTHORIZATION_IDENTIFIER_LENGTH)) throw new Error(errorCode);
 }
