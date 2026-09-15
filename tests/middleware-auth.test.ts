@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 vi.mock("../src/lib/prisma", () => ({
   prisma: {
-    userSession: { findUnique: vi.fn(), update: vi.fn() }
+    userSession: { findUnique: vi.fn(), updateMany: vi.fn() }
   }
 }));
 
@@ -19,7 +19,7 @@ const getContext = getSessionContext as any;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  db.userSession.update.mockResolvedValue({ id: "session-1" });
+  db.userSession.updateMany.mockResolvedValue({ count: 1 });
 });
 
 describe("session authentication middleware", () => {
@@ -63,7 +63,7 @@ describe("session authentication middleware", () => {
     getContext.mockResolvedValue(null);
 
     await expect(requireSession("token-1")).resolves.toBeNull();
-    expect(db.userSession.update).not.toHaveBeenCalled();
+    expect(db.userSession.updateMany).not.toHaveBeenCalled();
   });
 
   it("refreshes lastSeenAt for a valid session", async () => {
@@ -82,11 +82,15 @@ describe("session authentication middleware", () => {
     const result = await requireSession("token-1");
 
     expect(result).toMatchObject({ sessionId: "session-1", branchId: "branch-1" });
-    expect(db.userSession.update).toHaveBeenCalledOnce();
-    expect(db.userSession.update.mock.calls[0][0]).toMatchObject({
-      where: { id: "session-1" }
+    expect(db.userSession.updateMany).toHaveBeenCalledOnce();
+    expect(db.userSession.updateMany.mock.calls[0][0]).toMatchObject({
+      where: {
+        id: "session-1",
+        revokedAt: null,
+        expiresAt: { gt: expect.any(Date) }
+      }
     });
-    expect(db.userSession.update.mock.calls[0][0].data.lastSeenAt).toBeInstanceOf(Date);
+    expect(db.userSession.updateMany.mock.calls[0][0].data.lastSeenAt).toBeInstanceOf(Date);
   });
 
   it("rejects an empty branch id without touching the session", async () => {
