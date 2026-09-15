@@ -37,15 +37,17 @@ function sameAuthorizedInventoryPayload(a: unknown, b: unknown) {
 export async function requestInventoryAdjustment(input: { branchId: string; productId: string; requestedById: string; employeeId: string; type: InventoryAdjustmentType; quantity: number; reason: string; unitCost?: number }) {
   if (!input.reason.trim()) throw new Error("AUTHORIZATION_REASON_REQUIRED");
   const delta = deltaFor(input.type, input.quantity);
-  const [branch, product, employee, balance] = await Promise.all([
+  const [branch, product, employee, balance, branchProduct] = await Promise.all([
     prisma.branch.findUnique({ where: { id: input.branchId }, select: { organizationId: true } }),
     prisma.product.findUnique({ where: { id: input.productId }, select: { organizationId: true } }),
     prisma.employee.findUnique({ where: { id: input.employeeId }, select: { organizationId: true } }),
     prisma.inventoryBalance.findUnique({ where: { branchId_productId: { branchId: input.branchId, productId: input.productId } }, select: { quantity: true } }),
+    prisma.branchProduct.findUnique({ where: { branchId_productId: { branchId: input.branchId, productId: input.productId } }, select: { isEnabled: true, product: { select: { organizationId: true } } } }),
   ]);
   if (!branch) throw new Error("BRANCH_NOT_FOUND");
   if (!product) throw new Error("PRODUCT_NOT_FOUND");
   if (product.organizationId !== branch.organizationId) throw new Error("PRODUCT_BRANCH_INVALID");
+  if (!branchProduct || !branchProduct.isEnabled || branchProduct.product.organizationId !== branch.organizationId) throw new Error("BRANCH_PRODUCT_SCOPE_FORBIDDEN");
   if (!employee) throw new Error("EMPLOYEE_NOT_FOUND");
   if (employee.organizationId !== branch.organizationId) throw new Error("EMPLOYEE_BRANCH_INVALID");
   if (input.unitCost !== undefined && (!Number.isFinite(input.unitCost) || input.unitCost < 0)) throw new Error("INVENTORY_UNIT_COST_INVALID");
@@ -100,6 +102,9 @@ export async function executeApprovedInventoryAdjustment(input: { requestId: str
     if (!approval || approval.approverId !== input.executorId) throw new Error("AUTHORIZATION_APPROVAL_INVALID");
     if (!(approval.approvedAt instanceof Date) || Number.isNaN(approval.approvedAt.getTime())) throw new Error("AUTHORIZATION_APPROVAL_INVALID");
     if (currentAuthorization.resolvedAt && approval.approvedAt.getTime() > currentAuthorization.resolvedAt.getTime()) throw new Error("AUTHORIZATION_APPROVAL_INVALID");
+
+    const branchProduct = await tx.branchProduct.findUnique({ where: { branchId_productId: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId! } }, select: { isEnabled: true, product: { select: { organizationId: true } } } });
+    if (!branchProduct || !branchProduct.isEnabled || branchProduct.product.organizationId !== currentAuthorization.organizationId) throw new Error("BRANCH_PRODUCT_SCOPE_FORBIDDEN");
 
     const alreadyExecuted = await tx.inventoryMovement.findFirst({ where: { referenceType: `MANUAL_${currentRequested.adjustmentType}`, referenceId: authorization.id }, select: { id: true } });
     if (alreadyExecuted) throw new Error("AUTHORIZATION_ALREADY_EXECUTED");
