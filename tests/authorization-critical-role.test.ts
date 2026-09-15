@@ -11,7 +11,7 @@ vi.mock("../src/lib/prisma", () => ({
 }));
 
 import { prisma } from "../src/lib/prisma";
-import { resolveAuthorization } from "../src/core/authorization";
+import { authorizationIntegrityHash, resolveAuthorization } from "../src/core/authorization";
 
 const db = prisma as any;
 
@@ -32,7 +32,7 @@ const admin = {
 };
 
 function request(type: string) {
-  return {
+  const value = {
     id: "auth-1",
     organizationId: "org-1",
     branchId: "branch-1",
@@ -43,8 +43,11 @@ function request(type: string) {
     entityType: "Configuration",
     entityId: "config-1",
     beforeData: { enabled: false },
-    requestedData: { enabled: true },
-    integrityHash: null
+    requestedData: { enabled: true }
+  };
+  return {
+    ...value,
+    integrityHash: authorizationIntegrityHash(value)
   };
 }
 
