@@ -107,9 +107,18 @@ export async function logout(token: string) {
   if (!isValidText(token, MAX_AUTH_TOKEN_LENGTH)) return null;
 
   const now = new Date();
+  const session = await prisma.userSession.findUnique({
+    where: { tokenHash: hashToken(token) },
+    select: { id: true, expiresAt: true, revokedAt: true }
+  });
+
+  if (!session || session.revokedAt || session.expiresAt <= now) {
+    return null;
+  }
+
   const result = await prisma.userSession.updateMany({
     where: {
-      tokenHash: hashToken(token),
+      id: session.id,
       revokedAt: null,
       expiresAt: { gt: now }
     },
@@ -118,8 +127,5 @@ export async function logout(token: string) {
 
   if (result.count !== 1) return null;
 
-  return {
-    id: "",
-    revokedAt: now
-  };
+  return { id: session.id, revokedAt: now };
 }
