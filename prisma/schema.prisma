@@ -743,24 +743,24 @@ model InventoryPolicy {
 }
 
 model AuthorizationRequest {
-  id                String                  @id @default(uuid()) @db.Uuid
-  organizationId    String                  @db.Uuid
-  branchId          String?                 @db.Uuid
-  requestedById     String                  @db.Uuid
-  type              AuthorizationType
-  status            AuthorizationStatus     @default(PENDING)
-  reason            String
-  entityType        String
-  entityId          String?                 @db.Uuid
-  beforeData        Json?
-  requestedData     Json?
-  integrityHash     String?                 @db.VarChar(64)
-  requestedAt       DateTime                @default(now())
-  resolvedAt        DateTime?
-  organization     Organization            @relation(fields: [organizationId], references: [id])
-  branch           Branch?                 @relation(fields: [branchId], references: [id])
-  requestedBy      User                    @relation("AuthorizationRequester", fields: [requestedById], references: [id])
-  approvals        AuthorizationApproval[]
+  id             String                  @id @default(uuid()) @db.Uuid
+  organizationId String                  @db.Uuid
+  branchId       String?                 @db.Uuid
+  requestedById  String                  @db.Uuid
+  type           AuthorizationType
+  status         AuthorizationStatus     @default(PENDING)
+  reason         String
+  entityType     String
+  entityId       String?                 @db.Uuid
+  beforeData     Json?
+  requestedData  Json?
+  integrityHash  String?                 @db.VarChar(64)
+  requestedAt    DateTime                @default(now())
+  resolvedAt     DateTime?
+  organization   Organization            @relation(fields: [organizationId], references: [id])
+  branch         Branch?                 @relation(fields: [branchId], references: [id])
+  requestedBy    User                    @relation("AuthorizationRequester", fields: [requestedById], references: [id])
+  approvals      AuthorizationApproval[]
 
   @@index([organizationId, requestedAt])
   @@index([branchId])
