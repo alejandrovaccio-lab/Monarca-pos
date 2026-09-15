@@ -60,7 +60,7 @@ export async function requestPurchaseReceipt(input: { branchId: string; requeste
   if (!employee || employee.organizationId !== branch.organizationId) throw new Error("EMPLOYEE_BRANCH_INVALID");
   if (!supplier || supplier.organizationId !== branch.organizationId) throw new Error("SUPPLIER_BRANCH_INVALID");
   const productIds = [...new Set(input.items.map((item) => item.productId))];
-  const products = await prisma.product.findMany({ where: { id: { in: productIds }, organizationId: branch.organizationId }, select: { id: true } });
+  const products = await prisma.product.findMany({ where: { id: { in: productIds }, organizationId: branch.organizationId, branchProducts: { some: { branchId: input.branchId, isEnabled: true } } }, select: { id: true } });
   if (products.length !== productIds.length) throw new Error("PURCHASE_PRODUCT_INVALID");
   const purchaseId = randomUUID();
   const purchasedAt = input.purchasedAt ? new Date(input.purchasedAt) : new Date();
@@ -123,7 +123,7 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     if (!supplier || supplier.organizationId !== currentAuthorization.organizationId) throw new Error("SUPPLIER_BRANCH_INVALID");
     if (!employee || employee.organizationId !== currentAuthorization.organizationId) throw new Error("EMPLOYEE_BRANCH_INVALID");
     const productIds = [...new Set(currentRequested.items.map((item) => item.productId))];
-    const products = await tx.product.findMany({ where: { id: { in: productIds }, organizationId: currentAuthorization.organizationId }, select: { id: true } });
+    const products = await tx.product.findMany({ where: { id: { in: productIds }, organizationId: currentAuthorization.organizationId, branchProducts: { some: { branchId: currentAuthorization.branchId!, isEnabled: true } } }, select: { id: true } });
     if (products.length !== productIds.length) throw new Error("PURCHASE_PRODUCT_INVALID");
 
     const purchase = await tx.purchase.create({ data: { id: currentRequested.purchaseId, branchId: currentAuthorization.branchId!, supplierId: currentRequested.supplierId, folio: currentFolio, purchasedAt: currentPurchasedAt, items: { create: currentRequested.items.map((item) => ({ productId: item.productId, quantity: item.quantity, unitCost: item.unitCost, taxRate: item.taxRate ?? null })) } } });
