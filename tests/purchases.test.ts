@@ -168,6 +168,7 @@ describe("purchase receipts", () => {
 
     await expect(executeApprovedPurchaseReceipt({ requestId: authorization.id, executorId: "user-1" }))
       .rejects.toThrow("PURCHASE_ALREADY_EXECUTED");
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: "Serializable" });
     expect(tx.user.findUnique).toHaveBeenCalledOnce();
     expect(tx.purchase.findUnique).toHaveBeenCalledOnce();
   });
