@@ -79,6 +79,7 @@ export async function executeApprovedInventoryAdjustment(input: { requestId: str
   const expectedIntegrityHash = authorizationIntegrityHash({ organizationId: authorization.organizationId, branchId: authorization.branchId ?? undefined, requestedById: authorization.requestedById, type: authorization.type, reason: authorization.reason, entityType: authorization.entityType, entityId: authorization.entityId ?? undefined, beforeData: authorization.beforeData, requestedData: authorization.requestedData });
   if (authorization.integrityHash && authorization.integrityHash !== expectedIntegrityHash) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
 
+  const executionAt = new Date();
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "AuthorizationRequest" WHERE "id" = ${authorization.id} FOR UPDATE`;
     const currentAuthorization = await tx.authorizationRequest.findUnique({ where: { id: authorization.id } });
@@ -101,6 +102,8 @@ export async function executeApprovedInventoryAdjustment(input: { requestId: str
     const approval = await tx.authorizationApproval.findFirst({ where: { authorizationRequestId: currentAuthorization.id, decision: "APPROVED" }, orderBy: { approvedAt: "desc" } });
     if (!approval || approval.approverId !== input.executorId) throw new Error("AUTHORIZATION_APPROVAL_INVALID");
     if (!(approval.approvedAt instanceof Date) || Number.isNaN(approval.approvedAt.getTime())) throw new Error("AUTHORIZATION_APPROVAL_INVALID");
+    if (approval.approvedAt.getTime() > executionAt.getTime()) throw new Error("AUTHORIZATION_APPROVAL_INVALID");
+    if (currentAuthorization.resolvedAt && currentAuthorization.resolvedAt.getTime() > executionAt.getTime()) throw new Error("AUTHORIZATION_APPROVAL_INVALID");
     if (currentAuthorization.resolvedAt && approval.approvedAt.getTime() > currentAuthorization.resolvedAt.getTime()) throw new Error("AUTHORIZATION_APPROVAL_INVALID");
 
     const branchProduct = await tx.branchProduct.findUnique({ where: { branchId_productId: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId! } }, select: { isEnabled: true, product: { select: { organizationId: true } } } });
@@ -116,7 +119,6 @@ export async function executeApprovedInventoryAdjustment(input: { requestId: str
     if (newQuantity < 0) throw new Error("INVENTORY_NEGATIVE_NOT_ALLOWED");
     if (Number(currentRequested.resultingQuantity) !== newQuantity) throw new Error("INVENTORY_CHANGED_SINCE_REQUEST");
 
-    const executionAt = new Date();
     await tx.inventoryBalance.upsert({ where: { branchId_productId: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId! } }, create: { branchId: currentAuthorization.branchId!, productId: currentAuthorization.entityId!, quantity: newQuantity }, update: { quantity: newQuantity } });
     let movement;
     try {
