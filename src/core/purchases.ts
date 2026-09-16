@@ -18,10 +18,13 @@ const MAX_PURCHASED_AT_LENGTH = 64;
 
 function validateItems(items: PurchaseRequestItem[]) {
   if (!items.length) throw new Error("PURCHASE_ITEMS_REQUIRED");
+  const productIds = new Set<string>();
   for (const item of items) {
     if (!Number.isFinite(item.quantity) || item.quantity <= 0) throw new Error("PURCHASE_ITEM_INVALID");
     if (!Number.isFinite(item.unitCost) || item.unitCost < 0) throw new Error("PURCHASE_UNIT_COST_INVALID");
     if (item.taxRate !== undefined && (!Number.isFinite(item.taxRate) || item.taxRate < 0)) throw new Error("PURCHASE_TAX_RATE_INVALID");
+    if (productIds.has(item.productId)) throw new Error("PURCHASE_DUPLICATE_PRODUCT");
+    productIds.add(item.productId);
   }
 }
 function validPurchaseIdentifier(value: unknown) { return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_PURCHASE_IDENTIFIER_LENGTH; }
@@ -90,6 +93,7 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     if (!currentAuthorization.integrityHash || currentAuthorization.integrityHash !== currentIntegrityHash || currentAuthorization.integrityHash !== authorization.integrityHash) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     const currentRequested = currentAuthorization.requestedData as RequestedPurchaseData | null;
     if (!validRequestedPurchaseData(currentRequested)) throw new Error("AUTHORIZATION_TARGET_INVALID");
+    validateItems(currentRequested.items);
 
     const executor = await tx.user.findUnique({ where: { id: input.executorId }, select: { organizationId: true, status: true, branchAccess: { select: { branchId: true } }, roles: { select: { role: { select: { name: true } } } } } });
     if (!executor || executor.status === "INACTIVE") throw new Error("AUTHORIZATION_APPROVER_REQUIRED");
