@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/lib/prisma", () => ({
   prisma: {
+    user: { findUnique: vi.fn() },
     branch: { findUnique: vi.fn() },
     product: { findUnique: vi.fn() },
     employee: { findUnique: vi.fn() },
@@ -18,6 +19,12 @@ const db = prisma as any;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  db.user.findUnique.mockResolvedValue({
+    id: "cashier-1",
+    organizationId: "org-1",
+    status: "ACTIVE",
+    branchAccess: [{ branchId: "branch-1" }],
+  });
   db.branch.findUnique.mockResolvedValue({ organizationId: "org-1" });
   db.product.findUnique.mockResolvedValue({ organizationId: "org-1" });
   db.employee.findUnique.mockResolvedValue({ organizationId: "org-1" });
