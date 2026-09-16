@@ -1,0 +1,69 @@
+-- InventoryMovement reference metadata must agree with the movement type.
+-- A reference is optional for legacy/manual rows, but when supplied it cannot
+-- describe a business flow that is semantically incompatible with the type.
+
+CREATE OR REPLACE FUNCTION prevent_inventory_movement_semantic_violation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW."referenceType" IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW."referenceId" IS NULL THEN
+    RAISE EXCEPTION 'INVENTORY_MOVEMENT_REFERENCE_ID_REQUIRED';
+  END IF;
+
+  IF NEW."type" = 'PURCHASE' AND NEW."referenceType" <> 'PURCHASE' THEN
+    RAISE EXCEPTION 'INVENTORY_MOVEMENT_REFERENCE_TYPE_MISMATCH';
+  END IF;
+
+  IF NEW."type" = 'SALE' AND NEW."referenceType" NOT IN ('SALE', 'SALE_ITEM') THEN
+    RAISE EXCEPTION 'INVENTORY_MOVEMENT_REFERENCE_TYPE_MISMATCH';
+  END IF;
+
+  IF NEW."type" = 'WASTE' AND NEW."referenceType" NOT IN ('MANUAL_WASTE', 'WASTE') THEN
+    RAISE EXCEPTION 'INVENTORY_MOVEMENT_REFERENCE_TYPE_MISMATCH';
+  END IF;
+
+  IF NEW."type" = 'SHRINKAGE' AND NEW."referenceType" NOT IN ('MANUAL_SHRINKAGE', 'SHRINKAGE') THEN
+    RAISE EXCEPTION 'INVENTORY_MOVEMENT_REFERENCE_TYPE_MISMATCH';
+  END IF;
+
+  IF NEW."type" = 'TRANSFER_IN' AND NEW."referenceType" NOT IN ('TRANSFER', 'TRANSFER_IN') THEN
+    RAISE EXCEPTION 'INVENTORY_MOVEMENT_REFERENCE_TYPE_MISMATCH';
+  END IF;
+
+  IF NEW."type" = 'TRANSFER_OUT' AND NEW."referenceType" NOT IN ('TRANSFER', 'TRANSFER_OUT') THEN
+    RAISE EXCEPTION 'INVENTORY_MOVEMENT_REFERENCE_TYPE_MISMATCH';
+  END IF;
+
+  IF NEW."type" = 'TRANSFORMATION_INPUT' AND NEW."referenceType" NOT IN ('TRANSFORMATION', 'TRANSFORMATION_INPUT') THEN
+    RAISE EXCEPTION 'INVENTORY_MOVEMENT_REFERENCE_TYPE_MISMATCH';
+  END IF;
+
+  IF NEW."type" = 'TRANSFORMATION_OUTPUT' AND NEW."referenceType" NOT IN ('TRANSFORMATION', 'TRANSFORMATION_OUTPUT') THEN
+    RAISE EXCEPTION 'INVENTORY_MOVEMENT_REFERENCE_TYPE_MISMATCH';
+  END IF;
+
+  IF NEW."type" = 'ADJUSTMENT' AND NEW."referenceType" NOT IN (
+    'MANUAL_ENTRY',
+    'MANUAL_EXIT',
+    'MANUAL_COUNT_CORRECTION',
+    'SALE_CANCEL_ITEM',
+    'SALE_REFUND_ITEM'
+  ) THEN
+    RAISE EXCEPTION 'INVENTORY_MOVEMENT_REFERENCE_TYPE_MISMATCH';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS inventory_movement_semantic_integrity ON "InventoryMovement";
+
+CREATE TRIGGER inventory_movement_semantic_integrity
+BEFORE INSERT ON "InventoryMovement"
+FOR EACH ROW
+EXECUTE FUNCTION prevent_inventory_movement_semantic_violation();
