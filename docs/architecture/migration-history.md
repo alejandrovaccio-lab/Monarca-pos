@@ -32,6 +32,7 @@ This document records the canonical chronological order of database migrations. 
 | 0019 | `0019_v1_0_18_product_cost_value_integrity` | Product cost value integrity |
 | 0020 | `0020_v1_0_19_product_cost_reference_integrity` | Product cost purchase reference target integrity |
 | 0021 | `0021_v1_0_20_product_cost_purchase_temporal_integrity` | Product cost purchase/effective timestamp coherence |
+| 0022 | `0022_v1_0_20_product_price_tenant_integrity` | Product price branch/product tenant integrity |
 
 ## Important naming rule
 
@@ -39,6 +40,6 @@ There are legacy duplicate numeric prefixes (`0012`, `0015`, and `0016`). They a
 
 From this point forward, new migrations must use a unique sequential prefix. The next migration is therefore:
 
-`0022_v1_0_21_<descriptive_name>`
+`0023_v1_0_21_<descriptive_name>`
 
 Do not reuse `0012`, `0015`, or `0016`, and do not renumber historical migrations.
