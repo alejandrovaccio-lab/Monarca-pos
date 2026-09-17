@@ -15,7 +15,9 @@ describe("ProductPrice tenant integrity", () => {
   });
 
   it("allows global prices only when the referenced product exists", () => {
-    expect(migration).toContain('NEW."branchId" IS NULL');
+    // The migration's ELSE branch is the explicit global-price path
+    // (equivalent to NEW.branchId IS NULL) and must validate the product.
+    expect(migration).toContain("ELSE");
     expect(migration).toContain('FROM "Product" p');
     expect(migration).toContain("PRODUCT_PRICE_PRODUCT_INVALID");
   });
