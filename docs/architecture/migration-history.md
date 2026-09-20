@@ -36,6 +36,7 @@ This document records the canonical chronological order of database migrations. 
 | 0023 | `0023_v1_0_21_product_price_value_integrity` | Product price value integrity |
 | 0024 | `0024_v1_0_22_product_price_temporal_integrity` | Product price creation timestamp integrity; future effective dates remain allowed for scheduled pricing |
 | 0025 | `0025_v1_0_23_product_price_effective_at_uniqueness` | Prevent duplicate price events at the same effective timestamp within a pricing scope |
+| 0026 | `0026_v1_0_24_product_price_branch_product_scope` | Require enabled branch-product assignment for branch-specific prices |
 
 ## Important naming rule
 
@@ -43,6 +44,6 @@ There are legacy duplicate numeric prefixes (`0012`, `0015`, and `0016`). They a
 
 From this point forward, new migrations must use a unique sequential prefix. The next migration is therefore:
 
-`0026_v1_0_24_<descriptive_name>`
+`0027_v1_0_25_<descriptive_name>`
 
-Do not reuse `0012`, `0015`, or `0016`, and do not renumber historical migrations.
+Do not reuse `0012`, `0015`, or `0016), and do not renumber historical migrations.
