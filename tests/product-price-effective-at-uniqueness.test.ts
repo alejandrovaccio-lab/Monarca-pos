@@ -17,7 +17,7 @@ describe("ProductPrice effectiveAt uniqueness", () => {
     expect(migration).toContain(
       'ON "ProductPrice" ("productId", "branchId", "effectiveAt")'
     );
-    expect(migration).toContain("WHERE "branchId" IS NOT NULL");
+    expect(migration).toContain('WHERE "branchId" IS NOT NULL');
     expect(migration).toContain("product_price_branch_effective_unique");
   });
 
@@ -25,7 +25,7 @@ describe("ProductPrice effectiveAt uniqueness", () => {
     expect(migration).toContain(
       'ON "ProductPrice" ("productId", "effectiveAt")'
     );
-    expect(migration).toContain("WHERE "branchId" IS NULL");
+    expect(migration).toContain('WHERE "branchId" IS NULL');
     expect(migration).toContain("product_price_global_effective_unique");
   });
 
