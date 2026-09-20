@@ -130,8 +130,19 @@ export async function createSale(input: {
     if (!product || product.organizationId !== branch.organizationId || product.status !== "ACTIVE") throw new Error("PRODUCT_NOT_AVAILABLE");
     if (!product.branchProducts.length || !product.branchProducts[0].isEnabled) throw new Error("PRODUCT_NOT_AVAILABLE_AT_BRANCH");
 
-    const configuredPrice = product.prices[0]?.price ?? product.publicPrice;
-    if (!configuredPrice) throw new Error("PRICE_NOT_CONFIGURED");
+    let configuredPrice = product.prices[0]?.price;
+    if (configuredPrice === undefined) {
+      const globalPrice = await db.productPrice.findFirst({
+        where: { productId: item.productId, branchId: null, effectiveAt: { lte: soldAt } },
+        orderBy: { effectiveAt: "desc" },
+        select: { price: true },
+      });
+      configuredPrice = globalPrice?.price;
+    }
+
+    configuredPrice ??= product.publicPrice;
+    if (configuredPrice === null || configuredPrice === undefined) throw new Error("PRICE_NOT_CONFIGURED");
+
     const unitPrice = positiveDecimal(configuredPrice.toString(), "SALE_PRICE_INVALID");
     if (item.unitPrice !== undefined && !unitPrice.eq(decimal(item.unitPrice))) throw new Error("PRICE_OVERRIDE_AUTHORIZATION_REQUIRED");
 
