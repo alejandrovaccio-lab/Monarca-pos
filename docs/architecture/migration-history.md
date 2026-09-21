@@ -38,6 +38,7 @@ This document records the canonical chronological order of database migrations. 
 | 0025 | `0025_v1_0_23_product_price_effective_at_uniqueness` | Prevent duplicate price events at the same effective timestamp within a pricing scope |
 | 0026 | `0026_v1_0_24_product_price_branch_product_scope` | Require enabled branch-product assignment for branch-specific prices |
 | 0027 | `0027_v1_0_25_product_price_immutability` | Prevent updates/deletes of historical and scheduled price events |
+| 0028 | `0028_v1_0_26_sale_status_transition_integrity` | Restrict sale status changes to one-way COMPLETED → CANCELLED/REFUNDED transitions |
 
 ## Important naming rule
 
@@ -45,6 +46,6 @@ There are legacy duplicate numeric prefixes (`0012`, `0015`, and `0016`). They a
 
 From this point forward, new migrations must use a unique sequential prefix. The next migration is therefore:
 
-`0028_v1_0_26_<descriptive_name>`
+`0029_v1_0_27_<descriptive_name>`
 
 Do not reuse `0012`, `0015`, or `0016), and do not renumber historical migrations.
