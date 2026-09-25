@@ -58,7 +58,16 @@ export async function executeApprovedSaleChange(input: {
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "AuthorizationRequest" WHERE "id" = ${authorization.id} FOR UPDATE`;
 
-    const currentAuthorization = await tx.authorizationRequest.findUnique({ where: { id: authorization.id } });
+    const currentAuthorization = await tx.authorizationRequest.findUnique({
+      where: { id: authorization.id },
+      include: {
+        approvals: {
+          where: { decision: "APPROVED" },
+          orderBy: { approvedAt: "desc" },
+          take: 1,
+        },
+      },
+    });
     if (!currentAuthorization) throw new Error("AUTHORIZATION_NOT_FOUND");
     if (currentAuthorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
     if (currentAuthorization.organizationId !== authorization.organizationId || currentAuthorization.branchId !== authorization.branchId || currentAuthorization.entityType !== "Sale" || currentAuthorization.entityId !== authorization.entityId) {
@@ -107,7 +116,12 @@ export async function executeApprovedSaleChange(input: {
       throw new Error("BRANCH_PRODUCT_SCOPE_FORBIDDEN");
     }
 
+    const approval = currentAuthorization.approvals[0];
+    if (!approval) throw new Error("AUTHORIZATION_TRACE_BROKEN");
+
     const status = targetStatusFor(currentAuthorization.type);
+    const executedAt = new Date();
+    const inventoryMovementIds: string[] = [];
 
     const changed = await tx.sale.updateMany({
       where: { id: sale.id, status: "COMPLETED" },
@@ -122,7 +136,7 @@ export async function executeApprovedSaleChange(input: {
         update: { quantity: { increment: item.quantity } },
       });
 
-      await tx.inventoryMovement.create({
+      const movement = await tx.inventoryMovement.create({
         data: {
           branchId: sale.branchId,
           productId: item.productId,
@@ -132,13 +146,18 @@ export async function executeApprovedSaleChange(input: {
           referenceType: status === "CANCELLED" ? "SALE_CANCEL_ITEM" : "SALE_REFUND_ITEM",
           referenceId: item.id,
           userId: input.executorId,
-          occurredAt: new Date(),
-          notes: `Reversión de inventario por ${status === "CANCELLED" ? "cancelación" : "devolución"} autorizada. Venta ${sale.id}. Solicitud ${currentAuthorization.id}.`,
+          occurredAt: executedAt,
+          notes: `Reversión de inventario por ${status === "CANCELLED" ? "cancelación" : "devolución"} autorizada. Venta ${sale.id}. Solicitud ${currentAuthorization.id}. Aprobación ${approval.id}.`,
         },
       });
+      inventoryMovementIds.push(movement.id);
     }
 
-    await tx.auditLog.create({
+    if (inventoryMovementIds.length !== sale.items.length) {
+      throw new Error("AUTHORIZATION_TRACE_BROKEN");
+    }
+
+    const audit = await tx.auditLog.create({
       data: {
         organizationId: currentAuthorization.organizationId,
         branchId: currentAuthorization.branchId,
@@ -155,12 +174,28 @@ export async function executeApprovedSaleChange(input: {
           id: sale.id,
           status,
           authorizationRequestId: currentAuthorization.id,
+          authorizationApprovalId: approval.id,
+          authorizationApprovedAt: approval.approvedAt,
+          executorId: input.executorId,
+          executedAt,
           inventoryRestored: true,
+          inventoryMovementIds,
         },
+        occurredAt: executedAt,
       },
     });
 
-    return { ...sale, status };
+    return {
+      ...sale,
+      status,
+      trace: {
+        authorizationRequestId: currentAuthorization.id,
+        authorizationApprovalId: approval.id,
+        inventoryMovementIds,
+        auditLogId: audit.id,
+        executedAt,
+      },
+    };
   });
 }
 
