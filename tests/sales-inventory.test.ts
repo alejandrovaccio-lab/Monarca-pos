@@ -40,6 +40,7 @@ const authorization = {
   entityId: "sale-1",
   beforeData: { id: "sale-1", status: "COMPLETED" },
   requestedData: { id: "sale-1", status: "CANCELLED" },
+  approvals: [{ id: "approval-1", approvedAt: new Date("2026-09-25T18:00:00.000Z"), decision: "APPROVED" }],
 };
 
 const executor = {
