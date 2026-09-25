@@ -42,6 +42,7 @@ const approvedCancellation = () => ({
   beforeData: { id: "sale-1", status: "COMPLETED" },
   requestedData: { id: "sale-1", status: "CANCELLED" },
   integrityHash: undefined,
+  approvals: [{ id: "approval-1", approvedAt: new Date("2026-09-25T18:00:00.000Z"), decision: "APPROVED" }],
 });
 
 beforeEach(() => {
