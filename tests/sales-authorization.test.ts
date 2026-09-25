@@ -100,7 +100,7 @@ describe("sale authorization enforcement", () => {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       inventoryBalance: { upsert: vi.fn() },
-      inventoryMovement: { create: vi.fn() },
+      inventoryMovement: { create: vi.fn().mockResolvedValue({ id: "movement-1" }) },
       auditLog: { create: vi.fn().mockResolvedValue({ id: "audit-1" }) },
     }));
 
