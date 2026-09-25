@@ -20,7 +20,7 @@ describe("Sale reversal integrity", () => {
   });
 
   it("requires the reversal quantity to exactly match the sold item", () => {
-    expect(migration).toContain("NEW."quantity" <> sale_item_quantity");
+    expect(migration).toContain('NEW."quantity" <> sale_item_quantity');
     expect(migration).toContain("SALE_REVERSAL_QUANTITY_MISMATCH");
   });
 
