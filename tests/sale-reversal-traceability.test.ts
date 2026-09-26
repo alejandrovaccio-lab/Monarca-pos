@@ -18,6 +18,14 @@ describe("Sale reversal traceability", () => {
     expect(sales).toContain("inventoryMovementIds.length !== sale.items.length");
   });
 
+  it("binds each inventory reversal movement to its originating sale item", () => {
+    expect(sales).toContain("quantity: item.quantity,");
+    expect(sales).toContain("unitCost: item.costSnapshot,");
+    expect(sales).toContain("referenceId: item.id,");
+    expect(sales).toContain("userId: input.executorId,");
+    expect(sales).toContain("referenceType: status === \"CANCELLED\" ? \"SALE_CANCEL_ITEM\" : \"SALE_REFUND_ITEM\",");
+  });
+
   it("links the audit record to the authorization approval and movements", () => {
     expect(sales).toContain("authorizationRequestId: currentAuthorization.id");
     expect(sales).toContain("authorizationApprovalId: approval.id");
