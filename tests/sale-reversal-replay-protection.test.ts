@@ -67,7 +67,7 @@ describe("sale reversal replay protection", () => {
     }));
 
     await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" }))
-      .rejects.toThrow("SALE_ALREADY_CHANGED");
+      .rejects.toThrow("AUTHORIZATION_TARGET_INVALID");
 
     expect(saleUpdateMany).not.toHaveBeenCalled();
     expect(inventoryUpsert).not.toHaveBeenCalled();
@@ -108,7 +108,7 @@ describe("sale reversal replay protection", () => {
     }));
 
     await expect(executeApprovedSaleChange({ requestId: "request-1", executorId: "manager-1" }))
-      .rejects.toThrow("SALE_ALREADY_CHANGED");
+      .rejects.toThrow("AUTHORIZATION_TARGET_INVALID");
 
     expect(saleFindUnique).toHaveBeenCalledOnce();
     expect(movementCreate).not.toHaveBeenCalled();
