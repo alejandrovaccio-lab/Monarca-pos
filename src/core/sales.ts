@@ -9,6 +9,8 @@ const TARGET_STATUS = {
   SALE_REFUND: "REFUNDED",
 } as const;
 
+const MAX_SERIALIZATION_RETRIES = 3;
+
 type SaleAuthorizationPayload = { id?: string; status?: string };
 
 export async function requestSaleChange(input: {
@@ -56,7 +58,7 @@ export async function executeApprovedSaleChange(input: {
   assertSaleAuthorizationIntegrity(authorization);
   assertSaleAuthorizationPayload(authorization, expectedStatus);
 
-  return prisma.$transaction(async (tx) => {
+  return runSerializableTransaction(() => prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "AuthorizationRequest" WHERE "id" = ${authorization.id} FOR UPDATE`;
 
     const currentAuthorization = await tx.authorizationRequest.findUnique({
@@ -197,7 +199,18 @@ export async function executeApprovedSaleChange(input: {
         executedAt,
       },
     };
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }), MAX_SERIALIZATION_RETRIES);
+}
+
+async function runSerializableTransaction<T>(operation: () => Promise<T>, maxRetries: number): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      if (error?.code !== "P2034" || attempt >= maxRetries) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10 * (attempt + 1)));
+    }
+  }
 }
 
 function assertSaleAuthorizationExecutorScope(
