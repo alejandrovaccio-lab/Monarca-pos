@@ -13,7 +13,7 @@ describe("Sale reversal atomic execution", () => {
   });
 
   it("performs the sale state transition inside the database transaction", () => {
-    expect(sales).toContain("return prisma.$transaction(async (tx) => {");
+    expect(sales).toContain("runSerializableTransaction(() => prisma.$transaction(async (tx) => {");
     expect(sales).toContain("await tx.sale.findUnique({");
     expect(sales).toContain("await tx.sale.updateMany({");
   });
