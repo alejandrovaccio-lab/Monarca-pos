@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { canApproveAuthorization, requestAuthorization, authorizationIntegrityHash } from "./authorization";
 
@@ -196,7 +197,7 @@ export async function executeApprovedSaleChange(input: {
         executedAt,
       },
     };
-  });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
 function assertSaleAuthorizationExecutorScope(
