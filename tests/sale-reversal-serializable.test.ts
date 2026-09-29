@@ -11,7 +11,7 @@ describe("Sale reversal serializable isolation", () => {
   });
 
   it("executes the complete approved sale change at SERIALIZABLE isolation", () => {
-    expect(sales).toContain("return prisma.$transaction(async (tx) => {");
+    expect(sales).toContain("runSerializableTransaction(() => prisma.$transaction(async (tx) => {");
     expect(sales).toContain("Prisma.TransactionIsolationLevel.Serializable");
   });
 
