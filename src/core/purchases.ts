@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { APPROVER_ROLES, authorizationIntegrityHash, canApproveAuthorization, requestAuthorization } from "./authorization";
+import { runWithSerializableRetry } from "./serializable-transaction";
 
 export type PurchaseRequestItem = { productId: string; quantity: number; unitCost: number; taxRate?: number };
 
@@ -84,7 +85,7 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
   const expectedIntegrityHash = authorizationIntegrityHash({ organizationId: authorization.organizationId, branchId: authorization.branchId ?? undefined, requestedById: authorization.requestedById, type: authorization.type, reason: authorization.reason, entityType: authorization.entityType, entityId: authorization.entityId ?? undefined, beforeData: authorization.beforeData, requestedData: authorization.requestedData });
   if (!authorization.integrityHash || authorization.integrityHash !== expectedIntegrityHash) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
 
-  return prisma.$transaction(async (tx) => {
+  return runWithSerializableRetry(() => prisma.$transaction(async (tx) => {
     const currentAuthorization = await tx.authorizationRequest.findUnique({ where: { id: authorization.id } });
     if (!currentAuthorization) throw new Error("AUTHORIZATION_NOT_FOUND");
     if (currentAuthorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
@@ -141,5 +142,5 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     }
     await tx.auditLog.create({ data: { organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId, userId: input.executorId, action: "PURCHASE_RECEIVED", entityType: "Purchase", entityId: purchase.id, beforeData: { inventoryChanged: false }, afterData: { purchaseId: purchase.id, supplierId: currentRequested.supplierId, folio: currentFolio, employeeId: currentRequested.employeeId, items: currentRequested.items, authorizationRequestId: currentAuthorization.id, approvalId: approval.id, approverId: approval.approverId } } });
     return purchase;
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }), { maxRetries: 3, baseDelayMs: 25 });
 }
