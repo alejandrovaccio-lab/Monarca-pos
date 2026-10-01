@@ -68,7 +68,7 @@ function transaction() {
     purchase: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: "purchase-1", folio: "FAC-507" }) },
     branch: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1" }) },
     supplier: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1" }) },
-    employee: { findUnique: vi.fn().mockResolvedValue({ organizationId: "emp-1" }) },
+    employee: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1" }) },
     product: { findMany: vi.fn().mockResolvedValue([{ id: "product-1" }]) },
     inventoryBalance: { findUnique: vi.fn().mockResolvedValue({ quantity: 5 }), upsert: vi.fn().mockResolvedValue({ quantity: 15 }) },
     inventoryMovement: { create: vi.fn().mockResolvedValue({ id: "movement-1" }) },
@@ -116,12 +116,16 @@ describe("approved purchase execution flow", () => {
     db.authorizationRequest.findUnique.mockResolvedValue(approvedAuthorization());
     const serializationConflict = Object.assign(new Error("Transaction failed due to a write conflict or a deadlock. Please retry your transaction"), { code: "P2034" });
     db.$transaction.mockRejectedValue(serializationConflict);
+    const tx = transaction();
 
     await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" }))
       .rejects.toMatchObject({ code: "P2034" });
 
     expect(db.$transaction).toHaveBeenCalledTimes(4);
-    expect(transaction().purchase.create).not.toHaveBeenCalled();
+    expect(tx.purchase.create).not.toHaveBeenCalled();
+    expect(tx.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(tx.productCost.create).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
 
   it("refuses a second execution of the same approved purchase", async () => {
