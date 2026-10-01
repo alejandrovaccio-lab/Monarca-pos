@@ -128,6 +128,30 @@ describe("approved purchase execution flow", () => {
     expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
 
+  it("revalidates authorization after a serialization retry and refuses a revoked approval", async () => {
+    canApproveAuthorization.mockResolvedValue(true);
+    const initialAuthorization = approvedAuthorization();
+    const revokedAuthorization = { ...initialAuthorization, status: "REVOKED" };
+    db.authorizationRequest.findUnique.mockResolvedValue(initialAuthorization);
+    const tx = transaction();
+    const serializationConflict = Object.assign(new Error("Transaction failed due to a write conflict or a deadlock. Please retry your transaction"), { code: "P2034" });
+    tx.authorizationRequest.findUnique
+      .mockResolvedValueOnce(initialAuthorization)
+      .mockResolvedValueOnce(revokedAuthorization);
+    tx.purchase.findUnique.mockRejectedValueOnce(serializationConflict);
+    db.$transaction.mockImplementation(async (callback: (tx: any) => unknown) => callback(tx));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" }))
+      .rejects.toThrow("AUTHORIZATION_NOT_APPROVED");
+
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(tx.purchase.create).not.toHaveBeenCalled();
+    expect(tx.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(tx.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(tx.productCost.create).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
   it("refuses a second execution of the same approved purchase", async () => {
     canApproveAuthorization.mockResolvedValue(true);
     db.authorizationRequest.findUnique.mockResolvedValue(approvedAuthorization());
