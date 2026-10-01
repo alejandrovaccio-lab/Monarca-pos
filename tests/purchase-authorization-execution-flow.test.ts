@@ -68,7 +68,7 @@ function transaction() {
     purchase: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: "purchase-1", folio: "FAC-507" }) },
     branch: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1" }) },
     supplier: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1" }) },
-    employee: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1" }) },
+    employee: { findUnique: vi.fn().mockResolvedValue({ organizationId: "emp-1" }) },
     product: { findMany: vi.fn().mockResolvedValue([{ id: "product-1" }]) },
     inventoryBalance: { findUnique: vi.fn().mockResolvedValue({ quantity: 5 }), upsert: vi.fn().mockResolvedValue({ quantity: 15 }) },
     inventoryMovement: { create: vi.fn().mockResolvedValue({ id: "movement-1" }) },
@@ -88,18 +88,10 @@ describe("approved purchase execution flow", () => {
       .resolves.toMatchObject({ id: "purchase-1", folio: "FAC-507" });
 
     expect(tx.purchase.create).toHaveBeenCalledOnce();
-    expect(tx.inventoryBalance.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      update: { quantity: 15 },
-    }));
-    expect(tx.inventoryMovement.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ type: "PURCHASE", quantity: 10, unitCost: 25, referenceType: "PURCHASE", referenceId: "purchase-1", userId: "manager-1", employeeId: "emp-1" }),
-    }));
-    expect(tx.productCost.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ productId: "product-1", cost: 25, source: "PURCHASE:purchase-1" }),
-    }));
-    expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ action: "PURCHASE_RECEIVED", entityType: "Purchase", entityId: "purchase-1", afterData: expect.objectContaining({ authorizationRequestId: "auth-1", approvalId: "approval-1", approverId: "manager-1" }) }),
-    }));
+    expect(tx.inventoryBalance.upsert).toHaveBeenCalledWith(expect.objectContaining({ update: { quantity: 15 } }));
+    expect(tx.inventoryMovement.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ type: "PURCHASE", quantity: 10, unitCost: 25, referenceType: "PURCHASE", referenceId: "purchase-1", userId: "manager-1", employeeId: "emp-1" }) }));
+    expect(tx.productCost.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ productId: "product-1", cost: 25, source: "PURCHASE:purchase-1" }) }));
+    expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ action: "PURCHASE_RECEIVED", entityType: "Purchase", entityId: "purchase-1", afterData: expect.objectContaining({ authorizationRequestId: "auth-1", approvalId: "approval-1", approverId: "manager-1" }) }) }));
   });
 
   it("retries the complete serializable purchase transaction after P2034", async () => {
@@ -107,9 +99,7 @@ describe("approved purchase execution flow", () => {
     db.authorizationRequest.findUnique.mockResolvedValue(approvedAuthorization());
     const tx = transaction();
     const serializationConflict = Object.assign(new Error("Transaction failed due to a write conflict or a deadlock. Please retry your transaction"), { code: "P2034" });
-    db.$transaction
-      .mockRejectedValueOnce(serializationConflict)
-      .mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(tx));
+    db.$transaction.mockRejectedValueOnce(serializationConflict).mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(tx));
 
     await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" }))
       .resolves.toMatchObject({ id: "purchase-1", folio: "FAC-507" });
@@ -119,6 +109,19 @@ describe("approved purchase execution flow", () => {
     expect(tx.inventoryMovement.create).toHaveBeenCalledOnce();
     expect(tx.productCost.create).toHaveBeenCalledOnce();
     expect(tx.auditLog.create).toHaveBeenCalledOnce();
+  });
+
+  it("stops after the configured retry limit and creates no purchase side effects", async () => {
+    canApproveAuthorization.mockResolvedValue(true);
+    db.authorizationRequest.findUnique.mockResolvedValue(approvedAuthorization());
+    const serializationConflict = Object.assign(new Error("Transaction failed due to a write conflict or a deadlock. Please retry your transaction"), { code: "P2034" });
+    db.$transaction.mockRejectedValue(serializationConflict);
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" }))
+      .rejects.toMatchObject({ code: "P2034" });
+
+    expect(db.$transaction).toHaveBeenCalledTimes(4);
+    expect(transaction().purchase.create).not.toHaveBeenCalled();
   });
 
   it("refuses a second execution of the same approved purchase", async () => {
