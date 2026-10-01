@@ -7,9 +7,10 @@ describe("Purchase authorization serializable isolation", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const purchases = readFileSync(join(here, "../src/core/purchases.ts"), "utf8");
 
-  it("executes the complete approved purchase receipt at SERIALIZABLE isolation", () => {
-    expect(purchases).toContain("return prisma.$transaction(async (tx) => {");
+  it("executes the complete approved purchase receipt at SERIALIZABLE isolation with retry protection", () => {
+    expect(purchases).toContain("return runWithSerializableRetry(() => prisma.$transaction(async (tx) => {");
     expect(purchases).toContain("Prisma.TransactionIsolationLevel.Serializable");
+    expect(purchases).toContain("from \"./serializable-transaction\"");
   });
 
   it("revalidates the authorization inside the transaction before purchase writes", () => {
