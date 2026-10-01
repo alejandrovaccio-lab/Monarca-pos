@@ -8,17 +8,28 @@ function serializableTransactionRunner() {
   return {
     executions,
     get balance() { return balance; },
-    transaction: async (name: string, work: (read: () => { quantity: number; version: number }, write: (quantity: number, expectedVersion: number) => void) => Promise<void>) => {
+    transaction: async (
+      name: string,
+      work: (
+        read: () => { quantity: number; version: number },
+        write: (quantity: number, expectedVersion: number) => void,
+        stage: (effect: () => void) => void,
+      ) => Promise<void>,
+    ) => {
       const snapshot = { quantity: balance, version };
       let nextQuantity = snapshot.quantity;
+      const stagedEffects: Array<() => void> = [];
       const write = (quantity: number, expectedVersion: number) => {
         if (version !== expectedVersion) throw new Error("SERIALIZATION_FAILURE");
         nextQuantity = quantity;
       };
-      await work(() => snapshot, write);
+
+      await work(() => snapshot, write, (effect) => stagedEffects.push(effect));
       if (version !== snapshot.version) throw new Error("SERIALIZATION_FAILURE");
+
       balance = nextQuantity;
       version += 1;
+      for (const effect of stagedEffects) effect();
       executions.push(name);
     },
   };
@@ -44,45 +55,45 @@ describe("purchase inventory concurrency", () => {
 
   it("rejects a stale concurrent write instead of overwriting the newer balance", async () => {
     const db = serializableTransactionRunner();
-    let staleWrite: (() => void) | undefined;
 
-    const first = db.transaction("purchase-a", async (read, write) => {
+    await db.transaction("purchase-a", async (read, write) => {
       const current = read();
       write(current.quantity + 10, current.version);
     });
-    await first;
 
     await expect(db.transaction("purchase-b-stale", async (read, write) => {
       const current = read();
-      staleWrite = () => write(current.quantity + 7, current.version - 1);
-      staleWrite();
+      write(current.quantity + 7, current.version - 1);
     })).rejects.toThrow("SERIALIZATION_FAILURE");
 
     expect(db.balance).toBe(15);
     expect(db.executions).toEqual(["purchase-a"]);
   });
 
-  it("keeps the failed transaction from creating downstream effects", async () => {
+  it("keeps downstream effects out of a transaction that fails serialization", async () => {
     const db = serializableTransactionRunner();
     const movementCreate = vi.fn();
     const auditCreate = vi.fn();
 
-    await db.transaction("purchase-a", async (read, write) => {
+    await db.transaction("purchase-a", async (read, write, stage) => {
       const current = read();
       write(current.quantity + 10, current.version);
-      movementCreate("purchase-a");
-      auditCreate("purchase-a");
+      stage(() => movementCreate("purchase-a"));
+      stage(() => auditCreate("purchase-a"));
     });
 
-    await expect(db.transaction("purchase-b-stale", async (read, write) => {
+    await expect(db.transaction("purchase-b-stale", async (read, write, stage) => {
       const current = read();
       write(current.quantity + 7, current.version - 1);
-      movementCreate("purchase-b-stale");
-      auditCreate("purchase-b-stale");
+      stage(() => movementCreate("purchase-b-stale"));
+      stage(() => auditCreate("purchase-b-stale"));
     })).rejects.toThrow("SERIALIZATION_FAILURE");
 
     expect(db.balance).toBe(15);
-    expect(movementCreate).toHaveBeenCalledTimes(2);
-    expect(auditCreate).toHaveBeenCalledTimes(2);
+    expect(db.executions).toEqual(["purchase-a"]);
+    expect(movementCreate).toHaveBeenCalledTimes(1);
+    expect(auditCreate).toHaveBeenCalledTimes(1);
+    expect(movementCreate).toHaveBeenCalledWith("purchase-a");
+    expect(auditCreate).toHaveBeenCalledWith("purchase-a");
   });
 });
