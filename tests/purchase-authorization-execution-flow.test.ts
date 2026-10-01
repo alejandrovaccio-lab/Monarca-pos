@@ -102,6 +102,25 @@ describe("approved purchase execution flow", () => {
     }));
   });
 
+  it("retries the complete serializable purchase transaction after P2034", async () => {
+    canApproveAuthorization.mockResolvedValue(true);
+    db.authorizationRequest.findUnique.mockResolvedValue(approvedAuthorization());
+    const tx = transaction();
+    const serializationConflict = Object.assign(new Error("Transaction failed due to a write conflict or a deadlock. Please retry your transaction"), { code: "P2034" });
+    db.$transaction
+      .mockRejectedValueOnce(serializationConflict)
+      .mockImplementationOnce(async (callback: (tx: any) => unknown) => callback(tx));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" }))
+      .resolves.toMatchObject({ id: "purchase-1", folio: "FAC-507" });
+
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(tx.purchase.create).toHaveBeenCalledOnce();
+    expect(tx.inventoryMovement.create).toHaveBeenCalledOnce();
+    expect(tx.productCost.create).toHaveBeenCalledOnce();
+    expect(tx.auditLog.create).toHaveBeenCalledOnce();
+  });
+
   it("refuses a second execution of the same approved purchase", async () => {
     canApproveAuthorization.mockResolvedValue(true);
     db.authorizationRequest.findUnique.mockResolvedValue(approvedAuthorization());
