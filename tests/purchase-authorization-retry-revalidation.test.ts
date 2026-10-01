@@ -86,12 +86,13 @@ function configureRetryAuthorizationRevocation(tx: ReturnType<typeof transaction
     .mockResolvedValueOnce(authorization("REVOKED"));
 
   const serializationConflict = Object.assign(new Error("Transaction failed due to a write conflict or a deadlock. Please retry your transaction"), { code: "P2034" });
-  db.$transaction
-    .mockImplementationOnce(async (callback: (transaction: any) => unknown) => {
-      await callback(tx);
-      throw serializationConflict;
-    })
-    .mockImplementationOnce(async (callback: (transaction: any) => unknown) => callback(tx));
+
+  // The first transaction observes the approved authorization, then encounters
+  // the serialization conflict before any purchase side effect can occur.
+  // The retry starts a fresh transaction and observes the revoked authorization.
+  tx.user.findUnique.mockRejectedValueOnce(serializationConflict);
+
+  db.$transaction.mockImplementation(async (callback: (transaction: any) => unknown) => callback(tx));
 }
 
 describe("purchase authorization revalidation across serializable retries", () => {
