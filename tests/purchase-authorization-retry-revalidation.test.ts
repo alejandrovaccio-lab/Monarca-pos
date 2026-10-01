@@ -79,18 +79,26 @@ function transaction() {
 
 beforeEach(() => vi.clearAllMocks());
 
+function configureRetryAuthorizationRevocation(tx: ReturnType<typeof transaction>) {
+  db.authorizationRequest.findUnique.mockResolvedValue(authorization("APPROVED"));
+  tx.authorizationRequest.findUnique
+    .mockResolvedValueOnce(authorization("APPROVED"))
+    .mockResolvedValueOnce(authorization("REVOKED"));
+
+  const serializationConflict = Object.assign(new Error("Transaction failed due to a write conflict or a deadlock. Please retry your transaction"), { code: "P2034" });
+  db.$transaction
+    .mockImplementationOnce(async (callback: (transaction: any) => unknown) => {
+      await callback(tx);
+      throw serializationConflict;
+    })
+    .mockImplementationOnce(async (callback: (transaction: any) => unknown) => callback(tx));
+}
+
 describe("purchase authorization revalidation across serializable retries", () => {
   it("rejects a purchase when authorization is revoked before the retry", async () => {
     canApproveAuthorization.mockResolvedValue(true);
     const tx = transaction();
-    tx.authorizationRequest.findUnique
-      .mockResolvedValueOnce(authorization("APPROVED"))
-      .mockResolvedValueOnce(authorization("REVOKED"));
-
-    const serializationConflict = Object.assign(new Error("Transaction failed due to a write conflict or a deadlock. Please retry your transaction"), { code: "P2034" });
-    db.$transaction
-      .mockRejectedValueOnce(serializationConflict)
-      .mockImplementationOnce(async (callback: (transaction: any) => unknown) => callback(tx));
+    configureRetryAuthorizationRevocation(tx);
 
     await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" }))
       .rejects.toThrow("AUTHORIZATION_NOT_APPROVED");
@@ -107,14 +115,7 @@ describe("purchase authorization revalidation across serializable retries", () =
   it("does not treat the pre-retry authorization snapshot as sufficient authorization", async () => {
     canApproveAuthorization.mockResolvedValue(true);
     const tx = transaction();
-    tx.authorizationRequest.findUnique
-      .mockResolvedValueOnce(authorization("APPROVED"))
-      .mockResolvedValueOnce(authorization("REVOKED"));
-
-    const serializationConflict = Object.assign(new Error("Transaction failed due to a write conflict or a deadlock. Please retry your transaction"), { code: "P2034" });
-    db.$transaction
-      .mockRejectedValueOnce(serializationConflict)
-      .mockImplementationOnce(async (callback: (transaction: any) => unknown) => callback(tx));
+    configureRetryAuthorizationRevocation(tx);
 
     await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" }))
       .rejects.toMatchObject({ message: "AUTHORIZATION_NOT_APPROVED" });
