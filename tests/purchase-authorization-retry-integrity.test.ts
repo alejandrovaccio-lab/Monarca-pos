@@ -20,7 +20,7 @@ vi.mock("../src/lib/prisma", () => ({
 
 vi.mock("../src/core/authorization", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/core/authorization")>();
-  return { ...actual, canApproveAuthorization: vi.fn(), authorizationIntegrityHash: vi.fn(() => "test-integrity-hash") };
+  return { ...actual, canApproveAuthorization: vi.fn(), authorizationIntegrityHash: vi.fn((input: any) => JSON.stringify(input.requestedData)) };
 });
 
 import { prisma } from "../src/lib/prisma";
@@ -33,6 +33,16 @@ const approvedAt = new Date("2026-09-29T10:04:00.000Z");
 const resolvedAt = new Date("2026-09-29T10:05:00.000Z");
 
 function authorization(requestedDataOverrides: Record<string, unknown> = {}) {
+  const requestedData = {
+    purchaseId: "purchase-1",
+    branchId: "branch-1",
+    supplierId: "supplier-1",
+    folio: "FAC-521",
+    employeeId: "emp-1",
+    purchasedAt: requestedAt.toISOString(),
+    items: [{ productId: "product-1", quantity: 10, unitCost: 25, taxRate: 16 }],
+    ...requestedDataOverrides,
+  };
   return {
     id: "auth-1",
     organizationId: "org-1",
@@ -46,17 +56,8 @@ function authorization(requestedDataOverrides: Record<string, unknown> = {}) {
     beforeData: null,
     requestedAt,
     resolvedAt,
-    integrityHash: "test-integrity-hash",
-    requestedData: {
-      purchaseId: "purchase-1",
-      branchId: "branch-1",
-      supplierId: "supplier-1",
-      folio: "FAC-521",
-      employeeId: "emp-1",
-      purchasedAt: requestedAt.toISOString(),
-      items: [{ productId: "product-1", quantity: 10, unitCost: 25, taxRate: 16 }],
-      ...requestedDataOverrides,
-    },
+    integrityHash: JSON.stringify(requestedData),
+    requestedData,
   };
 }
 
