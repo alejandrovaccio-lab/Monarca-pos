@@ -63,6 +63,7 @@ beforeEach(() => vi.clearAllMocks());
 describe("purchase authorization approver revalidation across serializable retries", () => {
   it("rejects a retry when the executor becomes inactive", async () => {
     const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
     transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
     transaction.user.findUnique
       .mockResolvedValueOnce({ status: "ACTIVE", organizationId: "org-1", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] })
@@ -85,6 +86,7 @@ describe("purchase authorization approver revalidation across serializable retri
 
   it("rejects a retry when the recorded approver changes", async () => {
     const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
     transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
     transaction.authorizationApproval.findFirst
       .mockResolvedValueOnce({ id: "approval-1", approverId: "manager-1", decision: "APPROVED", approvedAt })
