@@ -27,7 +27,8 @@ beforeEach(()=>vi.clearAllMocks());
 
 describe("purchase authorization approver revalidation across serializable retries",()=>{
   it("rejects a retry when authorization target data changes",async()=>{
-    const transaction=tx(); db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    const transaction=tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
     const changed=authorization(); changed.requestedData.items[0].unitCost=99;
     transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
     transaction.authorizationRequest.findUnique.mockResolvedValueOnce(authorization()).mockResolvedValueOnce(changed);
