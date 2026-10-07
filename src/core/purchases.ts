@@ -17,6 +17,7 @@ const MAX_PURCHASE_UNIT_COST = 1_000_000_000;
 const MAX_PURCHASE_TAX_RATE = 100;
 const MAX_PURCHASED_AT_LENGTH = 64;
 const PURCHASE_DECIMAL_SCALE = 4;
+const MAX_INVENTORY_BALANCE = 99_999_999_999.9999;
 
 function hasMaxDecimalScale(value: number) {
   const scaled = value * 10 ** PURCHASE_DECIMAL_SCALE;
@@ -153,7 +154,9 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     for (const item of currentRequested.items) {
       const current = await tx.inventoryBalance.findUnique({ where: { branchId_productId: { branchId: currentAuthorization.branchId!, productId: item.productId } }, select: { quantity: true } });
       const previousQuantity = Number(current?.quantity ?? 0);
+      if (!Number.isFinite(previousQuantity) || Math.abs(previousQuantity) > MAX_INVENTORY_BALANCE) throw new Error("PURCHASE_INVENTORY_INVALID");
       const newQuantity = previousQuantity + item.quantity;
+      if (!Number.isFinite(newQuantity) || Math.abs(newQuantity) > MAX_INVENTORY_BALANCE) throw new Error("PURCHASE_INVENTORY_INVALID");
       await tx.inventoryBalance.upsert({ where: { branchId_productId: { branchId: currentAuthorization.branchId!, productId: item.productId } }, create: { branchId: currentAuthorization.branchId!, productId: item.productId, quantity: newQuantity }, update: { quantity: newQuantity } });
       await tx.inventoryMovement.create({ data: { branchId: currentAuthorization.branchId!, productId: item.productId, type: "PURCHASE", quantity: item.quantity, unitCost: item.unitCost, referenceType: "PURCHASE", referenceId: purchase.id, userId: input.executorId, employeeId: currentRequested.employeeId, occurredAt: currentPurchasedAt, notes: `Compra ${currentFolio}: ${currentAuthorization.reason}` } });
       await tx.productCost.create({ data: { productId: item.productId, cost: item.unitCost, source: `PURCHASE:${purchase.id}`, effectiveAt: currentPurchasedAt } });
