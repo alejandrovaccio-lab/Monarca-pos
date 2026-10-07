@@ -136,7 +136,11 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
       purchase = await tx.purchase.create({ data: { id: currentRequested.purchaseId, branchId: currentAuthorization.branchId!, supplierId: currentRequested.supplierId, folio: currentFolio, purchasedAt: currentPurchasedAt, items: { create: currentRequested.items.map((item) => ({ productId: item.productId, quantity: item.quantity, unitCost: item.unitCost, taxRate: item.taxRate ?? null })) } } });
     } catch (error) {
       if (typeof error === "object" && error !== null && (error as { code?: unknown }).code === "P2002") {
-        throw new Error("PURCHASE_ALREADY_EXECUTED");
+        const meta = (error as { meta?: { target?: unknown } }).meta;
+        const target = Array.isArray(meta?.target) ? meta.target : [];
+        if (target.length === 0 || target.includes("id")) {
+          throw new Error("PURCHASE_ALREADY_EXECUTED");
+        }
       }
       throw error;
     }
