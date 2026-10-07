@@ -188,4 +188,67 @@ describe("purchase authorization approver revalidation across serializable retri
     expect(transaction.productCost.create).not.toHaveBeenCalled();
     expect(transaction.auditLog.create).not.toHaveBeenCalled();
   });
+
+  it("rejects a retry when the referenced supplier changes organization", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.supplier.findUnique
+      .mockResolvedValueOnce({ organizationId: "org-1" })
+      .mockResolvedValueOnce({ organizationId: "org-2" });
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_REFERENCE_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.supplier.findUnique).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when the referenced employee changes organization", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.employee.findUnique
+      .mockResolvedValueOnce({ organizationId: "org-1" })
+      .mockResolvedValueOnce({ organizationId: "org-2" });
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_REFERENCE_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.employee.findUnique).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when a referenced product is disabled for the branch", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.product.findMany
+      .mockResolvedValueOnce([{ id: "product-1" }])
+      .mockResolvedValueOnce([]);
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_REFERENCE_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.product.findMany).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
 });
