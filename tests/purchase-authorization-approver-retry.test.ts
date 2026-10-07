@@ -20,7 +20,7 @@ vi.mock("../src/lib/prisma", () => ({
 
 vi.mock("../src/core/authorization", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/core/authorization")>();
-  return { ...actual, canApproveAuthorization: vi.fn().mockResolvedValue(true), authorizationIntegrityHash: vi.fn(() => "test-integrity-hash") };
+  return { ...actual, canApproveAuthorization: vi.fn().mockResolvedValue(true), authorizationIntegrityHash: vi.fn((input: any) => input?.requestedData?.items?.[0]?.unitCost === 99 ? "changed-integrity-hash" : "test-integrity-hash") };
 });
 
 import { prisma } from "../src/lib/prisma";
