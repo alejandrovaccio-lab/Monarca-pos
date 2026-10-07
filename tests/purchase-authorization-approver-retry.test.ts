@@ -262,6 +262,45 @@ describe("purchase authorization approver revalidation across serializable retri
     expect(transaction.auditLog.create).toHaveBeenCalledTimes(1);
   });
 
+
+  it("rejects execution when the authorized purchase already exists", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.findUnique.mockResolvedValue({ id: "purchase-1" });
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("PURCHASE_ALREADY_EXECUTED");
+
+    expect(transaction.purchase.findUnique).toHaveBeenCalledWith({ where: { id: "purchase-1" } });
+    expect(transaction.purchase.create).not.toHaveBeenCalled();
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rechecks purchase existence after a serializable retry conflict", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "purchase-1" });
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("PURCHASE_ALREADY_EXECUTED");
+
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.findUnique).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
   it("rejects a retry when the referenced supplier changes organization", async () => {
     const transaction = tx();
     db.authorizationRequest.findUnique.mockResolvedValue(authorization());
