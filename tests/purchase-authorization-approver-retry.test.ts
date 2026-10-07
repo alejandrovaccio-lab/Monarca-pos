@@ -316,6 +316,40 @@ describe("purchase authorization approver revalidation across serializable retri
     expect(transaction.auditLog.create).not.toHaveBeenCalled();
   });
 
+  it("stops the purchase flow when inventory recording fails", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockResolvedValue({ id: "purchase-1" });
+    transaction.inventoryMovement.create.mockRejectedValueOnce(new Error("INVENTORY_MOVEMENT_FAILED"));
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("INVENTORY_MOVEMENT_FAILED");
+
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryMovement.create).toHaveBeenCalledTimes(1);
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops the purchase flow when product cost recording fails", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockResolvedValue({ id: "purchase-1" });
+    transaction.productCost.create.mockRejectedValueOnce(new Error("PRODUCT_COST_FAILED"));
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("PRODUCT_COST_FAILED");
+
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryMovement.create).toHaveBeenCalledTimes(1);
+    expect(transaction.productCost.create).toHaveBeenCalledTimes(1);
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects a retry when the referenced supplier changes organization", async () => {
     const transaction = tx();
     db.authorizationRequest.findUnique.mockResolvedValue(authorization());
