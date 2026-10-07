@@ -138,7 +138,7 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
       if (typeof error === "object" && error !== null && (error as { code?: unknown }).code === "P2002") {
         const meta = (error as { meta?: { target?: unknown } }).meta;
         const target = Array.isArray(meta?.target) ? meta.target : [];
-        if (target.length === 0 || target.includes("id")) {
+        if (target.includes("id")) {
           throw new Error("PURCHASE_ALREADY_EXECUTED");
         }
       }
