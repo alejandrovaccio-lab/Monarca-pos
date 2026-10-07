@@ -220,6 +220,48 @@ describe("purchase authorization approver revalidation across serializable retri
     expect(transaction.auditLog.create).not.toHaveBeenCalled();
   });
 
+  it("persists exactly the authorized economic values when execution succeeds", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    const purchase = { id: "purchase-1" };
+    transaction.purchase.create.mockResolvedValue(purchase);
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).resolves.toEqual(purchase);
+
+    expect(transaction.purchase.create).toHaveBeenCalledWith({
+      data: {
+        id: "purchase-1",
+        branchId: "branch-1",
+        supplierId: "supplier-1",
+        folio: "FAC-523",
+        purchasedAt: requestedAt,
+        items: {
+          create: [{
+            productId: "product-1",
+            quantity: 10,
+            unitCost: 25,
+            taxRate: 16
+          }]
+        }
+      }
+    });
+    expect(transaction.inventoryMovement.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        productId: "product-1",
+        quantity: 10,
+        unitCost: 25
+      })
+    });
+    expect(transaction.productCost.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        productId: "product-1",
+        cost: 25
+      })
+    });
+    expect(transaction.auditLog.create).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects a retry when the referenced supplier changes organization", async () => {
     const transaction = tx();
     db.authorizationRequest.findUnique.mockResolvedValue(authorization());
