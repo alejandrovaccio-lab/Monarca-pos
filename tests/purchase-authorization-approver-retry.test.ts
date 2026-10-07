@@ -20,7 +20,14 @@ vi.mock("../src/lib/prisma", () => ({
 
 vi.mock("../src/core/authorization", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/core/authorization")>();
-  return { ...actual, canApproveAuthorization: vi.fn().mockResolvedValue(true), authorizationIntegrityHash: vi.fn((input: any) => input?.requestedData?.items?.[0]?.unitCost === 99 ? "changed-integrity-hash" : "test-integrity-hash") };
+  return {
+    ...actual,
+    canApproveAuthorization: vi.fn().mockResolvedValue(true),
+    authorizationIntegrityHash: vi.fn((input: any) => {
+      const item = input?.requestedData?.items?.[0];
+      return item?.unitCost === 99 || item?.quantity === 20 || item?.taxRate === 20 ? "changed-integrity-hash" : "test-integrity-hash";
+    })
+  };
 });
 
 import { prisma } from "../src/lib/prisma";
@@ -171,6 +178,30 @@ describe("purchase authorization approver revalidation across serializable retri
     db.authorizationRequest.findUnique.mockResolvedValue(authorization());
     const changed = authorization();
     changed.requestedData.items[0].unitCost = 99;
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.authorizationRequest.findUnique
+      .mockResolvedValueOnce(authorization())
+      .mockResolvedValueOnce(changed);
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.authorizationRequest.findUnique).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when authorized economic values change", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    const changed = authorization();
+    changed.requestedData.items[0].quantity = 20;
+    changed.requestedData.items[0].taxRate = 20;
     transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
     transaction.authorizationRequest.findUnique
       .mockResolvedValueOnce(authorization())
