@@ -33,6 +33,40 @@ describe("purchase receipts", () => {
     expect(requestAuthorization).toHaveBeenCalledWith(expect.objectContaining({ type: "OTHER", entityType: "Purchase", requestedData: expect.objectContaining({ branchId: "branch-1", supplierId: "supplier-1", folio: "FAC-100", items: [{ productId: "product-1", quantity: 10, unitCost: 25 }] }) })); expect(result.id).toBe("auth-1");
   });
 
+  it("rejects purchase quantities with more than four decimal places", async () => {
+    await expect(requestPurchaseReceipt({
+      branchId: "branch-1",
+      requestedById: "user-1",
+      employeeId: "emp-1",
+      supplierId: "supplier-1",
+      folio: "FAC-101",
+      reason: "Resurtido",
+      items: [{ productId: "product-1", quantity: 1.00001, unitCost: 25 }],
+    })).rejects.toThrow("PURCHASE_ITEM_INVALID");
+  });
+
+  it("rejects purchase unit costs and tax rates with more than four decimal places", async () => {
+    await expect(requestPurchaseReceipt({
+      branchId: "branch-1",
+      requestedById: "user-1",
+      employeeId: "emp-1",
+      supplierId: "supplier-1",
+      folio: "FAC-102",
+      reason: "Resurtido",
+      items: [{ productId: "product-1", quantity: 1, unitCost: 25.12345 }],
+    })).rejects.toThrow("PURCHASE_UNIT_COST_INVALID");
+
+    await expect(requestPurchaseReceipt({
+      branchId: "branch-1",
+      requestedById: "user-1",
+      employeeId: "emp-1",
+      supplierId: "supplier-1",
+      folio: "FAC-103",
+      reason: "Resurtido",
+      items: [{ productId: "product-1", quantity: 1, unitCost: 25, taxRate: 16.12345 }],
+    })).rejects.toThrow("PURCHASE_TAX_RATE_INVALID");
+  });
+
   it("blocks execution without an authorized approver", async () => { canApproveAuthorization.mockResolvedValue(false); await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "user-1" })).rejects.toThrow("AUTHORIZATION_APPROVER_REQUIRED"); });
   it("rejects an inactive executor before loading the authorization", async () => { canApproveAuthorization.mockResolvedValue(true); db.authorizationRequest.findUnique.mockResolvedValue(null); await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "user-1" })).rejects.toThrow("AUTHORIZATION_NOT_FOUND"); });
 
