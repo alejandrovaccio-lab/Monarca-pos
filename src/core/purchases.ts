@@ -131,7 +131,15 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     const products = await tx.product.findMany({ where: { id: { in: productIds }, organizationId: currentAuthorization.organizationId, branchProducts: { some: { branchId: currentAuthorization.branchId!, isEnabled: true } } }, select: { id: true } });
     if (products.length !== productIds.length) throw new Error("PURCHASE_PRODUCT_INVALID");
 
-    const purchase = await tx.purchase.create({ data: { id: currentRequested.purchaseId, branchId: currentAuthorization.branchId!, supplierId: currentRequested.supplierId, folio: currentFolio, purchasedAt: currentPurchasedAt, items: { create: currentRequested.items.map((item) => ({ productId: item.productId, quantity: item.quantity, unitCost: item.unitCost, taxRate: item.taxRate ?? null })) } } });
+    let purchase;
+    try {
+      purchase = await tx.purchase.create({ data: { id: currentRequested.purchaseId, branchId: currentAuthorization.branchId!, supplierId: currentRequested.supplierId, folio: currentFolio, purchasedAt: currentPurchasedAt, items: { create: currentRequested.items.map((item) => ({ productId: item.productId, quantity: item.quantity, unitCost: item.unitCost, taxRate: item.taxRate ?? null })) } } });
+    } catch (error) {
+      if (typeof error === "object" && error !== null && (error as { code?: unknown }).code === "P2002") {
+        throw new Error("PURCHASE_ALREADY_EXECUTED");
+      }
+      throw error;
+    }
     for (const item of currentRequested.items) {
       const current = await tx.inventoryBalance.findUnique({ where: { branchId_productId: { branchId: currentAuthorization.branchId!, productId: item.productId } }, select: { quantity: true } });
       const previousQuantity = Number(current?.quantity ?? 0);
