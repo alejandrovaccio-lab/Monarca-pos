@@ -452,4 +452,37 @@ describe("purchase authorization approver revalidation across serializable retri
     expect(transaction.productCost.create).not.toHaveBeenCalled();
     expect(transaction.auditLog.create).not.toHaveBeenCalled();
   });
+
+  it("recalculates inventory from the latest balance after a serializable retry", async () => {
+    const firstTransaction = tx();
+    const secondTransaction = tx();
+
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    firstTransaction.purchase.create.mockResolvedValue({ id: "purchase-1" });
+    secondTransaction.purchase.create.mockResolvedValue({ id: "purchase-1" });
+    firstTransaction.inventoryBalance.findUnique.mockResolvedValue({ quantity: 5 });
+    secondTransaction.inventoryBalance.findUnique.mockResolvedValue({ quantity: 15 });
+
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => {
+        await callback(firstTransaction);
+        throw serializationConflict;
+      })
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(secondTransaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).resolves.toEqual({ id: "purchase-1" });
+
+    expect(firstTransaction.inventoryBalance.upsert).toHaveBeenCalledWith({
+      where: { branchId_productId: { branchId: "branch-1", productId: "product-1" } },
+      create: { branchId: "branch-1", productId: "product-1", quantity: 15 },
+      update: { quantity: 15 },
+    });
+    expect(secondTransaction.inventoryBalance.upsert).toHaveBeenCalledWith({
+      where: { branchId_productId: { branchId: "branch-1", productId: "product-1" } },
+      create: { branchId: "branch-1", productId: "product-1", quantity: 25 },
+      update: { quantity: 25 },
+    });
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+  });
+
 });
