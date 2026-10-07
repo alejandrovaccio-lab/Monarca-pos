@@ -16,14 +16,20 @@ const MAX_PURCHASE_QUANTITY = 1_000_000;
 const MAX_PURCHASE_UNIT_COST = 1_000_000_000;
 const MAX_PURCHASE_TAX_RATE = 100;
 const MAX_PURCHASED_AT_LENGTH = 64;
+const PURCHASE_DECIMAL_SCALE = 4;
+
+function hasMaxDecimalScale(value: number) {
+  const scaled = value * 10 ** PURCHASE_DECIMAL_SCALE;
+  return Math.abs(scaled - Math.round(scaled)) <= 1e-9;
+}
 
 function validateItems(items: PurchaseRequestItem[]) {
   if (!items.length) throw new Error("PURCHASE_ITEMS_REQUIRED");
   const productIds = new Set<string>();
   for (const item of items) {
-    if (!Number.isFinite(item.quantity) || item.quantity <= 0) throw new Error("PURCHASE_ITEM_INVALID");
-    if (!Number.isFinite(item.unitCost) || item.unitCost < 0) throw new Error("PURCHASE_UNIT_COST_INVALID");
-    if (item.taxRate !== undefined && (!Number.isFinite(item.taxRate) || item.taxRate < 0)) throw new Error("PURCHASE_TAX_RATE_INVALID");
+    if (!Number.isFinite(item.quantity) || item.quantity <= 0 || !hasMaxDecimalScale(item.quantity)) throw new Error("PURCHASE_ITEM_INVALID");
+    if (!Number.isFinite(item.unitCost) || item.unitCost < 0 || !hasMaxDecimalScale(item.unitCost)) throw new Error("PURCHASE_UNIT_COST_INVALID");
+    if (item.taxRate !== undefined && (!Number.isFinite(item.taxRate) || item.taxRate < 0 || !hasMaxDecimalScale(item.taxRate))) throw new Error("PURCHASE_TAX_RATE_INVALID");
     if (productIds.has(item.productId)) throw new Error("PURCHASE_DUPLICATE_PRODUCT");
     productIds.add(item.productId);
   }
@@ -33,9 +39,9 @@ function validPurchaseItem(value: unknown): value is PurchaseRequestItem {
   if (!value || typeof value !== "object") return false;
   const item = value as { productId?: unknown; quantity?: unknown; unitCost?: unknown; taxRate?: unknown };
   if (typeof item.productId !== "string" || item.productId.trim().length === 0 || item.productId.length > MAX_PURCHASE_PRODUCT_ID_LENGTH) return false;
-  if (typeof item.quantity !== "number" || !Number.isFinite(item.quantity) || item.quantity <= 0 || item.quantity > MAX_PURCHASE_QUANTITY) return false;
-  if (typeof item.unitCost !== "number" || !Number.isFinite(item.unitCost) || item.unitCost < 0 || item.unitCost > MAX_PURCHASE_UNIT_COST) return false;
-  if (item.taxRate !== undefined && (typeof item.taxRate !== "number" || !Number.isFinite(item.taxRate) || item.taxRate < 0 || item.taxRate > MAX_PURCHASE_TAX_RATE)) return false;
+  if (typeof item.quantity !== "number" || !Number.isFinite(item.quantity) || item.quantity <= 0 || item.quantity > MAX_PURCHASE_QUANTITY || !hasMaxDecimalScale(item.quantity)) return false;
+  if (typeof item.unitCost !== "number" || !Number.isFinite(item.unitCost) || item.unitCost < 0 || item.unitCost > MAX_PURCHASE_UNIT_COST || !hasMaxDecimalScale(item.unitCost)) return false;
+  if (item.taxRate !== undefined && (typeof item.taxRate !== "number" || !Number.isFinite(item.taxRate) || item.taxRate < 0 || item.taxRate > MAX_PURCHASE_TAX_RATE || !hasMaxDecimalScale(item.taxRate))) return false;
   return true;
 }
 function validPurchasedAt(value: unknown): value is string { return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_PURCHASED_AT_LENGTH && !Number.isNaN(new Date(value).getTime()); }
