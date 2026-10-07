@@ -129,7 +129,7 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     if (!employee || employee.organizationId !== currentAuthorization.organizationId) throw new Error("AUTHORIZATION_REFERENCE_INTEGRITY_VIOLATION");
     const productIds = [...new Set(currentRequested.items.map((item) => item.productId))];
     const products = await tx.product.findMany({ where: { id: { in: productIds }, organizationId: currentAuthorization.organizationId, branchProducts: { some: { branchId: currentAuthorization.branchId!, isEnabled: true } } }, select: { id: true } });
-    if (products.length !== productIds.length) throw new Error("AUTHORIZATION_REFERENCE_INTEGRITY_VIOLATION");
+    if (products.length !== productIds.length) throw new Error("PURCHASE_PRODUCT_INVALID");
 
     const purchase = await tx.purchase.create({ data: { id: currentRequested.purchaseId, branchId: currentAuthorization.branchId!, supplierId: currentRequested.supplierId, folio: currentFolio, purchasedAt: currentPurchasedAt, items: { create: currentRequested.items.map((item) => ({ productId: item.productId, quantity: item.quantity, unitCost: item.unitCost, taxRate: item.taxRate ?? null })) } } });
     for (const item of currentRequested.items) {
