@@ -282,10 +282,33 @@ describe("purchase authorization approver revalidation across serializable retri
   it("maps a concurrent purchase unique conflict to idempotent execution rejection", async () => {
     const transaction = tx();
     db.authorizationRequest.findUnique.mockResolvedValue(authorization());
-    transaction.purchase.create.mockRejectedValueOnce(Object.assign(new Error("Unique constraint failed on the fields: (id)"), { code: "P2002" }));
+    transaction.purchase.create.mockRejectedValueOnce(Object.assign(new Error("Unique constraint failed on the fields: (id)"), { code: "P2002", meta: { target: ["id"] } }));
     db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
 
     await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("PURCHASE_ALREADY_EXECUTED");
+
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+
+  it("does not misclassify a purchase folio unique conflict as an already-executed purchase", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(
+      Object.assign(new Error("Unique constraint failed on the fields: (branchId, folio)"), {
+        code: "P2002",
+        meta: { target: ["branchId", "folio"] },
+      }),
+    );
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow(
+      "Unique constraint failed on the fields: (branchId, folio)",
+    );
 
     expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
     expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
