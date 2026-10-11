@@ -100,6 +100,7 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
   if (!authorization.integrityHash || authorization.integrityHash !== expectedIntegrityHash) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
 
   let observedApprovalTimestamp: number | undefined;
+  let observedApprovalId: string | undefined;
 
   return runWithSerializableRetry(() => prisma.$transaction(async (tx) => {
     const currentAuthorization = await tx.authorizationRequest.findUnique({ where: { id: authorization.id } });
@@ -127,8 +128,9 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     if (currentAuthorization.resolvedAt !== null && currentAuthorization.resolvedAt !== undefined && (!(currentAuthorization.resolvedAt instanceof Date) || Number.isNaN(currentAuthorization.resolvedAt.getTime()))) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     if (!(approval.approvedAt instanceof Date) || Number.isNaN(approval.approvedAt.getTime())) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     const currentApprovalTimestamp = approval.approvedAt.getTime();
-    if (observedApprovalTimestamp !== undefined && observedApprovalTimestamp !== currentApprovalTimestamp) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    if ((observedApprovalTimestamp !== undefined && observedApprovalTimestamp !== currentApprovalTimestamp) || (observedApprovalId !== undefined && observedApprovalId !== approval.id)) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     observedApprovalTimestamp = currentApprovalTimestamp;
+    observedApprovalId = approval.id;
     const requestedAt = currentAuthorization.requestedAt.getTime();
     const resolvedAt = currentAuthorization.resolvedAt?.getTime();
     const approvedAt = approval.approvedAt.getTime();
