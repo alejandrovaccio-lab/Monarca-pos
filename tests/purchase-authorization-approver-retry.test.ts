@@ -238,6 +238,7 @@ describe("purchase authorization approver revalidation across serializable retri
       decision: "APPROVED",
       approvedAt: new Date("invalid"),
     });
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
 
     await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
     expect(db.$transaction).toHaveBeenCalledTimes(1);
