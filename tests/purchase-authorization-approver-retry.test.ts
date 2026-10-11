@@ -72,16 +72,21 @@ describe("purchase authorization approver revalidation across serializable retri
     const transaction = tx();
     db.authorizationRequest.findUnique.mockResolvedValue(authorization());
     transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
-    transaction.user.findUnique
-      .mockResolvedValueOnce({ status: "ACTIVE", organizationId: "org-1", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] })
-      .mockResolvedValueOnce({ status: "INACTIVE", organizationId: "org-1", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] });
+    let executorLookupCount = 0;
+    transaction.user.findUnique.mockImplementation(async ({ where }: any) => {
+      if (where.id === "requester-1") return { organizationId: "org-1" };
+      executorLookupCount += 1;
+      return executorLookupCount === 1
+        ? { status: "ACTIVE", organizationId: "org-1", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] }
+        : { status: "INACTIVE", organizationId: "org-1", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] };
+    });
     db.$transaction
       .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
       .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
 
     await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_APPROVER_REQUIRED");
     expect(db.$transaction).toHaveBeenCalledTimes(2);
-    expect(transaction.user.findUnique).toHaveBeenCalledTimes(2);
+    expect(transaction.user.findUnique).toHaveBeenCalledTimes(3);
     expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
     expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
     expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
@@ -114,9 +119,14 @@ describe("purchase authorization approver revalidation across serializable retri
     const transaction = tx();
     db.authorizationRequest.findUnique.mockResolvedValue(authorization());
     transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
-    transaction.user.findUnique
-      .mockResolvedValueOnce({ status: "ACTIVE", organizationId: "org-1", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] })
-      .mockResolvedValueOnce({ status: "ACTIVE", organizationId: "org-1", branchAccess: [], roles: [{ role: { name: "GERENTE" } }] });
+    let executorLookupCount = 0;
+    transaction.user.findUnique.mockImplementation(async ({ where }: any) => {
+      if (where.id === "requester-1") return { organizationId: "org-1" };
+      executorLookupCount += 1;
+      return executorLookupCount === 1
+        ? { status: "ACTIVE", organizationId: "org-1", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] }
+        : { status: "ACTIVE", organizationId: "org-1", branchAccess: [], roles: [{ role: { name: "GERENTE" } }] };
+    });
     db.$transaction
       .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
       .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
