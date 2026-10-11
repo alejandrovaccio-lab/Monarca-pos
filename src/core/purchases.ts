@@ -120,7 +120,7 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     if (currentAuthorization.branchId && !executor.branchAccess.some(({ branchId }) => branchId === currentAuthorization.branchId)) throw new Error("AUTHORIZATION_SCOPE_FORBIDDEN");
 
     const approval = await tx.authorizationApproval.findFirst({ where: { authorizationRequestId: currentAuthorization.id }, orderBy: [{ approvedAt: "desc" }, { id: "desc" }], select: { id: true, approverId: true, decision: true, approvedAt: true } });
-    if (!approval || typeof approval.id !== "string" || !approval.id.trim() || approval.decision !== "APPROVED") throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    if (!approval || typeof approval.id !== "string" || !approval.id.trim() || typeof approval.approverId !== "string" || !approval.approverId.trim() || approval.decision !== "APPROVED") throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     if (approval.approverId !== input.executorId) throw new Error("AUTHORIZATION_APPROVER_MISMATCH");
     const requester = await tx.user.findUnique({ where: { id: currentAuthorization.requestedById }, select: { organizationId: true } });
     if (!requester || requester.organizationId !== currentAuthorization.organizationId) throw new Error("AUTHORIZATION_REFERENCE_INTEGRITY_VIOLATION");
