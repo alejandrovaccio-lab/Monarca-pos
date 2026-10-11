@@ -99,6 +99,8 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
   const expectedIntegrityHash = authorizationIntegrityHash({ organizationId: authorization.organizationId, branchId: authorization.branchId ?? undefined, requestedById: authorization.requestedById, type: authorization.type, reason: authorization.reason, entityType: authorization.entityType, entityId: authorization.entityId ?? undefined, beforeData: authorization.beforeData, requestedData: authorization.requestedData });
   if (!authorization.integrityHash || authorization.integrityHash !== expectedIntegrityHash) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
 
+  let observedApprovalTimestamp: number | undefined;
+
   return runWithSerializableRetry(() => prisma.$transaction(async (tx) => {
     const currentAuthorization = await tx.authorizationRequest.findUnique({ where: { id: authorization.id } });
     if (!currentAuthorization) throw new Error("AUTHORIZATION_NOT_FOUND");
@@ -124,6 +126,9 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     if (!(currentAuthorization.requestedAt instanceof Date) || Number.isNaN(currentAuthorization.requestedAt.getTime())) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     if (currentAuthorization.resolvedAt !== null && currentAuthorization.resolvedAt !== undefined && (!(currentAuthorization.resolvedAt instanceof Date) || Number.isNaN(currentAuthorization.resolvedAt.getTime()))) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     if (!(approval.approvedAt instanceof Date) || Number.isNaN(approval.approvedAt.getTime())) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    const currentApprovalTimestamp = approval.approvedAt.getTime();
+    if (observedApprovalTimestamp !== undefined && observedApprovalTimestamp !== currentApprovalTimestamp) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    observedApprovalTimestamp = currentApprovalTimestamp;
     const requestedAt = currentAuthorization.requestedAt.getTime();
     const resolvedAt = currentAuthorization.resolvedAt?.getTime();
     const approvedAt = approval.approvedAt.getTime();
