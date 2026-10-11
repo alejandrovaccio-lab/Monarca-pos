@@ -293,6 +293,8 @@ describe("purchase authorization approver revalidation across serializable retri
       })
     });
     expect(transaction.auditLog.create).toHaveBeenCalledTimes(1);
+    expect(transaction.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ afterData: expect.objectContaining({ authorizationRequestId: "auth-1", authorizationRequestedAt: requestedAt, authorizationResolvedAt: resolvedAt, approvalId: "approval-1", approverId: "manager-1", approvedAt }) }) }));
+
   });
 
 
