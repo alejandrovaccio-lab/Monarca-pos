@@ -133,7 +133,7 @@ describe("purchase authorization approver revalidation across serializable retri
 
     await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_SCOPE_FORBIDDEN");
     expect(db.$transaction).toHaveBeenCalledTimes(2);
-    expect(transaction.user.findUnique).toHaveBeenCalledTimes(2);
+    expect(transaction.user.findUnique).toHaveBeenCalledTimes(3);
     expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
     expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
     expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
