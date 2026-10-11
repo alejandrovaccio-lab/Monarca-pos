@@ -24,6 +24,13 @@ function hasMaxDecimalScale(value: number) {
   return Math.abs(scaled - Math.round(scaled)) <= 1e-9;
 }
 
+function sameDateValue(left: unknown, right: unknown) {
+  if (left == null || right == null) return left == null && right == null;
+  return left instanceof Date && right instanceof Date &&
+    !Number.isNaN(left.getTime()) && !Number.isNaN(right.getTime()) &&
+    left.getTime() === right.getTime();
+}
+
 function validateItems(items: PurchaseRequestItem[]) {
   if (!items.length) throw new Error("PURCHASE_ITEMS_REQUIRED");
   const productIds = new Set<string>();
@@ -96,7 +103,7 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     const currentAuthorization = await tx.authorizationRequest.findUnique({ where: { id: authorization.id } });
     if (!currentAuthorization) throw new Error("AUTHORIZATION_NOT_FOUND");
     if (currentAuthorization.status !== "APPROVED") throw new Error("AUTHORIZATION_NOT_APPROVED");
-    if (currentAuthorization.organizationId !== authorization.organizationId || currentAuthorization.branchId !== authorization.branchId || currentAuthorization.requestedById !== authorization.requestedById || currentAuthorization.type !== authorization.type || currentAuthorization.reason !== authorization.reason || currentAuthorization.entityType !== authorization.entityType || currentAuthorization.entityId !== authorization.entityId) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    if (currentAuthorization.organizationId !== authorization.organizationId || currentAuthorization.branchId !== authorization.branchId || currentAuthorization.requestedById !== authorization.requestedById || currentAuthorization.type !== authorization.type || currentAuthorization.reason !== authorization.reason || currentAuthorization.entityType !== authorization.entityType || currentAuthorization.entityId !== authorization.entityId || !sameDateValue(currentAuthorization.requestedAt, authorization.requestedAt) || !sameDateValue(currentAuthorization.resolvedAt, authorization.resolvedAt)) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     const currentIntegrityHash = authorizationIntegrityHash({ organizationId: currentAuthorization.organizationId, branchId: currentAuthorization.branchId ?? undefined, requestedById: currentAuthorization.requestedById, type: currentAuthorization.type, reason: currentAuthorization.reason, entityType: currentAuthorization.entityType, entityId: currentAuthorization.entityId ?? undefined, beforeData: currentAuthorization.beforeData, requestedData: currentAuthorization.requestedData });
     if (!currentAuthorization.integrityHash || currentAuthorization.integrityHash !== currentIntegrityHash || currentAuthorization.integrityHash !== authorization.integrityHash) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     const currentRequested = currentAuthorization.requestedData as RequestedPurchaseData | null;
