@@ -229,6 +229,25 @@ describe("purchase authorization approver revalidation across serializable retri
     expect(transaction.auditLog.create).not.toHaveBeenCalled();
   });
 
+  it("rejects an approval with an invalid timestamp before writing purchase side effects", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.authorizationApproval.findFirst.mockResolvedValue({
+      id: "approval-1",
+      approverId: "manager-1",
+      decision: "APPROVED",
+      approvedAt: new Date("invalid"),
+    });
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(transaction.purchase.create).not.toHaveBeenCalled();
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
   it("rejects a retry when the approval timestamp changes but remains within the authorization window", async () => {
     const transaction = tx();
     db.authorizationRequest.findUnique.mockResolvedValue(authorization());
