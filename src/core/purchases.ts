@@ -112,6 +112,8 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     const approval = await tx.authorizationApproval.findFirst({ where: { authorizationRequestId: currentAuthorization.id }, orderBy: { approvedAt: "desc" }, select: { id: true, approverId: true, decision: true, approvedAt: true } });
     if (!approval || approval.decision !== "APPROVED") throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     if (approval.approverId !== input.executorId) throw new Error("AUTHORIZATION_APPROVER_MISMATCH");
+    const requester = await tx.user.findUnique({ where: { id: currentAuthorization.requestedById }, select: { organizationId: true } });
+    if (!requester || requester.organizationId !== currentAuthorization.organizationId) throw new Error("AUTHORIZATION_REFERENCE_INTEGRITY_VIOLATION");
     if (!(currentAuthorization.requestedAt instanceof Date) || Number.isNaN(currentAuthorization.requestedAt.getTime())) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     if (currentAuthorization.resolvedAt !== null && currentAuthorization.resolvedAt !== undefined && (!(currentAuthorization.resolvedAt instanceof Date) || Number.isNaN(currentAuthorization.resolvedAt.getTime()))) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
     if (!(approval.approvedAt instanceof Date) || Number.isNaN(approval.approvedAt.getTime())) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
