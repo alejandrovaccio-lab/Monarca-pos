@@ -134,7 +134,7 @@ export async function executeApprovedPurchaseReceipt(input: { requestId: string;
     const requestedAt = currentAuthorization.requestedAt.getTime();
     const resolvedAt = currentAuthorization.resolvedAt?.getTime();
     const approvedAt = approval.approvedAt.getTime();
-    if (approvedAt < requestedAt || (resolvedAt !== undefined && approvedAt > resolvedAt)) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
+    if (approvedAt < requestedAt || approvedAt > Date.now() || (resolvedAt !== undefined && approvedAt > resolvedAt)) throw new Error("AUTHORIZATION_INTEGRITY_VIOLATION");
 
     const existing = await tx.purchase.findUnique({ where: { id: currentRequested.purchaseId } });
     if (existing) throw new Error("PURCHASE_ALREADY_EXECUTED");
