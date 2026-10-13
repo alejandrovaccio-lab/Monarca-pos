@@ -162,6 +162,26 @@ describe("purchase authorization approver revalidation across serializable retri
     expect(transaction.auditLog.create).not.toHaveBeenCalled();
   });
 
+  it("rejects an approval timestamp in the future", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.authorizationApproval.findFirst.mockResolvedValue({
+      id: "approval-1",
+      approverId: "manager-1",
+      decision: "APPROVED",
+      approvedAt: new Date(Date.now() + 60_000),
+    });
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(transaction.purchase.create).not.toHaveBeenCalled();
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
   it("rejects an approval timestamp that predates the authorization request", async () => {
     const transaction = tx();
     db.authorizationRequest.findUnique.mockResolvedValue(authorization());
