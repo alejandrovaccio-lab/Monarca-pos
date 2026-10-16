@@ -1,8 +1,233 @@
-  it("rejects a retry when the requester reference changes", async () => {
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../src/lib/prisma", () => ({
+  prisma: {
+    authorizationRequest: { findUnique: vi.fn() },
+    user: { findUnique: vi.fn() },
+    authorizationApproval: { findFirst: vi.fn() },
+    purchase: { findUnique: vi.fn(), create: vi.fn() },
+    branch: { findUnique: vi.fn() },
+    supplier: { findUnique: vi.fn() },
+    employee: { findUnique: vi.fn() },
+    product: { findMany: vi.fn() },
+    inventoryBalance: { findUnique: vi.fn(), upsert: vi.fn() },
+    inventoryMovement: { create: vi.fn() },
+    productCost: { create: vi.fn() },
+    auditLog: { create: vi.fn() },
+    $transaction: vi.fn(),
+  },
+}));
+
+vi.mock("../src/core/authorization", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/core/authorization")>();
+  return {
+    ...actual,
+    canApproveAuthorization: vi.fn().mockResolvedValue(true),
+    authorizationIntegrityHash: vi.fn((input: any) => {
+      const item = input?.requestedData?.items?.[0];
+      return item?.unitCost === 99 || item?.quantity === 20 || item?.taxRate === 20 ? "changed-integrity-hash" : "test-integrity-hash";
+    })
+  };
+});
+
+import { prisma } from "../src/lib/prisma";
+import { executeApprovedPurchaseReceipt } from "../src/core/purchases";
+
+const db = prisma as any;
+const requestedAt = new Date("2026-09-29T10:00:00.000Z");
+const approvedAt = new Date("2026-09-29T10:04:00.000Z");
+
+function authorization() {
+  return {
+    id: "auth-1", organizationId: "org-1", branchId: "branch-1", requestedById: "requester-1",
+    status: "APPROVED", type: "OTHER", reason: "Resurtido autorizado", entityType: "Purchase", entityId: "purchase-1",
+    beforeData: null, requestedAt, resolvedAt: new Date("2026-09-29T10:05:00.000Z"), integrityHash: "test-integrity-hash",
+    requestedData: { purchaseId: "purchase-1", branchId: "branch-1", supplierId: "supplier-1", folio: "FAC-523", employeeId: "emp-1", purchasedAt: requestedAt.toISOString(), items: [{ productId: "product-1", quantity: 10, unitCost: 25, taxRate: 16 }] },
+  };
+}
+
+function tx() {
+  return {
+    authorizationRequest: { findUnique: vi.fn().mockResolvedValue(authorization()) },
+    user: { findUnique: vi.fn().mockResolvedValue({ status: "ACTIVE", organizationId: "org-1", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] }) },
+    authorizationApproval: { findFirst: vi.fn().mockResolvedValue({ id: "approval-1", approverId: "manager-1", decision: "APPROVED", approvedAt }) },
+    purchase: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn() },
+    branch: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1" }) },
+    supplier: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1" }) },
+    employee: { findUnique: vi.fn().mockResolvedValue({ organizationId: "org-1" }) },
+    product: { findMany: vi.fn().mockResolvedValue([{ id: "product-1" }]) },
+    inventoryBalance: { findUnique: vi.fn().mockResolvedValue({ quantity: 5 }), upsert: vi.fn() },
+    inventoryMovement: { create: vi.fn() },
+    productCost: { create: vi.fn() },
+    auditLog: { create: vi.fn() },
+  };
+}
+
+const serializationConflict = Object.assign(new Error("Transaction failed due to a write conflict or a deadlock. Please retry your transaction"), { code: "P2034" });
+
+beforeEach(() => vi.clearAllMocks());
+
+describe("purchase authorization approver revalidation across serializable retries", () => {
+  it("rejects a retry when the executor becomes inactive", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    let executorLookupCount = 0;
+    transaction.user.findUnique.mockImplementation(async ({ where }: any) => {
+      if (where.id === "requester-1") return { organizationId: "org-1" };
+      executorLookupCount += 1;
+      return executorLookupCount === 1
+        ? { status: "ACTIVE", organizationId: "org-1", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] }
+        : { status: "INACTIVE", organizationId: "org-1", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] };
+    });
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_APPROVER_REQUIRED");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.user.findUnique).toHaveBeenCalledTimes(3);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when the recorded approver changes", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.authorizationApproval.findFirst
+      .mockResolvedValueOnce({ id: "approval-1", approverId: "manager-1", decision: "APPROVED", approvedAt })
+      .mockResolvedValueOnce({ id: "approval-2", approverId: "manager-2", decision: "APPROVED", approvedAt });
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_APPROVER_MISMATCH");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.authorizationApproval.findFirst).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when the executor loses branch access", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    let executorLookupCount = 0;
+    transaction.user.findUnique.mockImplementation(async ({ where }: any) => {
+      if (where.id === "requester-1") return { organizationId: "org-1" };
+      executorLookupCount += 1;
+      return executorLookupCount === 1
+        ? { status: "ACTIVE", organizationId: "org-1", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] }
+        : { status: "ACTIVE", organizationId: "org-1", branchAccess: [], roles: [{ role: { name: "GERENTE" } }] };
+    });
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_SCOPE_FORBIDDEN");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.user.findUnique).toHaveBeenCalledTimes(3);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when the recorded approval is revoked", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.authorizationApproval.findFirst
+      .mockResolvedValueOnce({ id: "approval-1", approverId: "manager-1", decision: "APPROVED", approvedAt })
+      .mockResolvedValueOnce({ id: "approval-1", approverId: "manager-1", decision: "REJECTED", approvedAt });
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.authorizationApproval.findFirst).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an approval timestamp in the future", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.authorizationApproval.findFirst.mockResolvedValue({
+      id: "approval-1",
+      approverId: "manager-1",
+      decision: "APPROVED",
+      approvedAt: new Date(Date.now() + 60_000),
+    });
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(transaction.purchase.create).not.toHaveBeenCalled();
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an approval timestamp that predates the authorization request", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.authorizationApproval.findFirst.mockResolvedValue({
+      id: "approval-1",
+      approverId: "manager-1",
+      decision: "APPROVED",
+      approvedAt: new Date("2026-09-29T09:59:59.999Z"),
+    });
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(transaction.purchase.create).not.toHaveBeenCalled();
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when approval time moves outside the authorization window", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.authorizationApproval.findFirst
+      .mockResolvedValueOnce({ id: "approval-1", approverId: "manager-1", decision: "APPROVED", approvedAt })
+      .mockResolvedValueOnce({ id: "approval-2", approverId: "manager-1", decision: "APPROVED", approvedAt: new Date("2026-09-29T10:06:00.000Z") });
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.authorizationApproval.findFirst).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when authorization target data changes", async () => {
     const transaction = tx();
     db.authorizationRequest.findUnique.mockResolvedValue(authorization());
     const changed = authorization();
-    changed.requestedById = "requester-2";
+    changed.requestedData.items[0].unitCost = 99;
     transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
     transaction.authorizationRequest.findUnique
       .mockResolvedValueOnce(authorization())
@@ -14,6 +239,129 @@
     await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
     expect(db.$transaction).toHaveBeenCalledTimes(2);
     expect(transaction.authorizationRequest.findUnique).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when authorization timestamps change", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    const changed = authorization();
+    changed.requestedAt = new Date("2026-09-29T09:00:00.000Z");
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.authorizationRequest.findUnique
+      .mockResolvedValueOnce(authorization())
+      .mockResolvedValueOnce(changed);
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.authorizationRequest.findUnique).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an approval without a valid approver reference before purchase writes", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.authorizationApproval.findFirst.mockResolvedValue({
+      id: "approval-1",
+      approverId: "   ",
+      decision: "APPROVED",
+      approvedAt,
+    });
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(transaction.purchase.create).not.toHaveBeenCalled();
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an approval without a valid record identifier before purchase writes", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.authorizationApproval.findFirst.mockResolvedValue({
+      id: "   ",
+      approverId: "manager-1",
+      decision: "APPROVED",
+      approvedAt,
+    });
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(transaction.purchase.create).not.toHaveBeenCalled();
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an approval with an invalid timestamp before writing purchase side effects", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.authorizationApproval.findFirst.mockResolvedValue({
+      id: "approval-1",
+      approverId: "manager-1",
+      decision: "APPROVED",
+      approvedAt: new Date("invalid"),
+    });
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(transaction.purchase.create).not.toHaveBeenCalled();
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when the approval timestamp changes but remains within the authorization window", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.authorizationApproval.findFirst
+      .mockResolvedValueOnce({ id: "approval-1", approverId: "manager-1", decision: "APPROVED", approvedAt })
+      .mockResolvedValueOnce({ id: "approval-1", approverId: "manager-1", decision: "APPROVED", approvedAt: new Date("2026-09-29T10:03:30.000Z") });
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when the approval record identity changes", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.authorizationApproval.findFirst
+      .mockResolvedValueOnce({ id: "approval-1", approverId: "manager-1", decision: "APPROVED", approvedAt })
+      .mockResolvedValueOnce({ id: "approval-2", approverId: "manager-1", decision: "APPROVED", approvedAt });
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
     expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
     expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
     expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
@@ -43,3 +391,350 @@
     expect(transaction.productCost.create).not.toHaveBeenCalled();
     expect(transaction.auditLog.create).not.toHaveBeenCalled();
   });
+
+  it("rejects a retry when authorized economic values change", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    const changed = authorization();
+    changed.requestedData.items[0].quantity = 20;
+    changed.requestedData.items[0].taxRate = 20;
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.authorizationRequest.findUnique
+      .mockResolvedValueOnce(authorization())
+      .mockResolvedValueOnce(changed);
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.authorizationRequest.findUnique).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("persists exactly the authorized economic values when execution succeeds", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    const purchase = { id: "purchase-1" };
+    transaction.purchase.create.mockResolvedValue(purchase);
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).resolves.toEqual(purchase);
+
+    expect(transaction.purchase.create).toHaveBeenCalledWith({
+      data: {
+        id: "purchase-1",
+        branchId: "branch-1",
+        supplierId: "supplier-1",
+        folio: "FAC-523",
+        purchasedAt: requestedAt,
+        items: {
+          create: [{
+            productId: "product-1",
+            quantity: 10,
+            unitCost: 25,
+            taxRate: 16
+          }]
+        }
+      }
+    });
+    expect(transaction.inventoryMovement.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        productId: "product-1",
+        quantity: 10,
+        unitCost: 25
+      })
+    });
+    expect(transaction.productCost.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        productId: "product-1",
+        cost: 25
+      })
+    });
+    expect(transaction.auditLog.create).toHaveBeenCalledTimes(1);
+    expect(transaction.authorizationApproval.findFirst).toHaveBeenCalledWith(expect.objectContaining({ orderBy: [{ approvedAt: "desc" }, { id: "desc" }] }));
+    expect(transaction.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ afterData: expect.objectContaining({ authorizationRequestId: "auth-1", authorizationRequestedAt: requestedAt, authorizationResolvedAt: authorization().resolvedAt, approvalId: "approval-1", approverId: "manager-1", approvedAt }) }) }));
+
+  });
+
+
+  it("rejects execution when the authorized purchase already exists", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.findUnique.mockResolvedValue({ id: "purchase-1" });
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("PURCHASE_ALREADY_EXECUTED");
+
+    expect(transaction.purchase.findUnique).toHaveBeenCalledWith({ where: { id: "purchase-1" } });
+    expect(transaction.purchase.create).not.toHaveBeenCalled();
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("maps a concurrent purchase unique conflict to idempotent execution rejection", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(Object.assign(new Error("Unique constraint failed on the fields: (id)"), { code: "P2002", meta: { target: ["id"] } }));
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("PURCHASE_ALREADY_EXECUTED");
+
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+
+
+  it("does not classify an ambiguous unique conflict as an already-executed purchase", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    const conflict = Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+    transaction.purchase.create.mockRejectedValueOnce(conflict);
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toBe(conflict);
+
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("does not misclassify a purchase folio unique conflict as an already-executed purchase", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(
+      Object.assign(new Error("Unique constraint failed on the fields: (branchId, folio)"), {
+        code: "P2002",
+        meta: { target: ["branchId", "folio"] },
+      }),
+    );
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow(
+      "Unique constraint failed on the fields: (branchId, folio)",
+    );
+
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rechecks purchase existence after a serializable retry conflict", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: "purchase-1" });
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("PURCHASE_ALREADY_EXECUTED");
+
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.findUnique).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("stops the purchase flow when inventory recording fails", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockResolvedValue({ id: "purchase-1" });
+    transaction.inventoryMovement.create.mockRejectedValueOnce(new Error("INVENTORY_MOVEMENT_FAILED"));
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("INVENTORY_MOVEMENT_FAILED");
+
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryMovement.create).toHaveBeenCalledTimes(1);
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops the purchase flow when product cost recording fails", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockResolvedValue({ id: "purchase-1" });
+    transaction.productCost.create.mockRejectedValueOnce(new Error("PRODUCT_COST_FAILED"));
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("PRODUCT_COST_FAILED");
+
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryMovement.create).toHaveBeenCalledTimes(1);
+    expect(transaction.productCost.create).toHaveBeenCalledTimes(1);
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects execution when the original requester no longer belongs to the authorization organization", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.user.findUnique
+      .mockResolvedValueOnce({ status: "ACTIVE", organizationId: "org-1", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] })
+      .mockResolvedValueOnce({ organizationId: "org-2" });
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_REFERENCE_INTEGRITY_VIOLATION");
+
+    expect(transaction.user.findUnique).toHaveBeenCalledTimes(2);
+    expect(transaction.user.findUnique).toHaveBeenLastCalledWith({ where: { id: "requester-1" }, select: { organizationId: true } });
+    expect(transaction.purchase.create).not.toHaveBeenCalled();
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when the referenced supplier changes organization", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.supplier.findUnique
+      .mockResolvedValueOnce({ organizationId: "org-1" })
+      .mockResolvedValueOnce({ organizationId: "org-2" });
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_REFERENCE_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.supplier.findUnique).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when the referenced employee changes organization", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.employee.findUnique
+      .mockResolvedValueOnce({ organizationId: "org-1" })
+      .mockResolvedValueOnce({ organizationId: "org-2" });
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_REFERENCE_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.employee.findUnique).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when a referenced product is disabled for the branch", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.product.findMany
+      .mockResolvedValueOnce([{ id: "product-1" }])
+      .mockResolvedValueOnce([]);
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("PURCHASE_PRODUCT_INVALID");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.product.findMany).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+
+  it("rejects an out-of-range existing inventory balance before writing inventory", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockResolvedValue({ id: "purchase-1" });
+    transaction.inventoryBalance.findUnique.mockResolvedValue({ quantity: 100_000_000_000 });
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("PURCHASE_INVENTORY_INVALID");
+
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.findUnique).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an inventory balance overflow before writing inventory", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockResolvedValue({ id: "purchase-1" });
+    transaction.inventoryBalance.findUnique.mockResolvedValue({ quantity: 99_999_999_999.9999 });
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("PURCHASE_INVENTORY_INVALID");
+
+    expect(transaction.inventoryBalance.findUnique).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("recalculates inventory from the latest balance after a serializable retry", async () => {
+    const firstTransaction = tx();
+    const secondTransaction = tx();
+
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    firstTransaction.purchase.create.mockResolvedValue({ id: "purchase-1" });
+    secondTransaction.purchase.create.mockResolvedValue({ id: "purchase-1" });
+    firstTransaction.inventoryBalance.findUnique.mockResolvedValue({ quantity: 5 });
+    secondTransaction.inventoryBalance.findUnique.mockResolvedValue({ quantity: 15 });
+
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => {
+        await callback(firstTransaction);
+        throw serializationConflict;
+      })
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(secondTransaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).resolves.toEqual({ id: "purchase-1" });
+
+    expect(firstTransaction.inventoryBalance.upsert).toHaveBeenCalledWith({
+      where: { branchId_productId: { branchId: "branch-1", productId: "product-1" } },
+      create: { branchId: "branch-1", productId: "product-1", quantity: 15 },
+      update: { quantity: 15 },
+    });
+    expect(secondTransaction.inventoryBalance.upsert).toHaveBeenCalledWith({
+      where: { branchId_productId: { branchId: "branch-1", productId: "product-1" } },
+      create: { branchId: "branch-1", productId: "product-1", quantity: 25 },
+      update: { quantity: 25 },
+    });
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+  });
+
+});
