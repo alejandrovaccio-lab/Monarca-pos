@@ -71,12 +71,12 @@ describe("purchase authorization product reference integrity across serializable
     transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
     transaction.product.findMany
       .mockResolvedValueOnce([{ id: "product-1", organizationId: "org-1" }])
-      .mockResolvedValueOnce([{ id: "product-1", organizationId: "org-2" }]);
+      .mockResolvedValueOnce([]);
     db.$transaction
       .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
       .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
 
-    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_REFERENCE_INTEGRITY_VIOLATION");
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("PURCHASE_PRODUCT_INVALID");
     expect(db.$transaction).toHaveBeenCalledTimes(2);
     expect(transaction.product.findMany).toHaveBeenCalledTimes(2);
     expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
