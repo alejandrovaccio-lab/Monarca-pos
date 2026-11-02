@@ -90,6 +90,13 @@ describe("purchase authorization approval provenance across serializable retries
 
     expect(db.$transaction).toHaveBeenCalledTimes(2);
     expect(transaction.authorizationApproval.findFirst).toHaveBeenCalledTimes(2);
+    const expectedApprovalLookup = {
+      where: { authorizationRequestId: "auth-1" },
+      orderBy: [{ approvedAt: "desc" }, { id: "desc" }],
+      select: { id: true, approverId: true, decision: true, approvedAt: true },
+    };
+    expect(transaction.authorizationApproval.findFirst).toHaveBeenNthCalledWith(1, expectedApprovalLookup);
+    expect(transaction.authorizationApproval.findFirst).toHaveBeenNthCalledWith(2, expectedApprovalLookup);
     expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
     expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
     expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
