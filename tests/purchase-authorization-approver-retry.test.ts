@@ -68,6 +68,21 @@ const serializationConflict = Object.assign(new Error("Transaction failed due to
 beforeEach(() => vi.clearAllMocks());
 
 describe("purchase authorization approver revalidation across serializable retries", () => {
+  it("rejects execution when the executor is not the recorded approver", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    db.$transaction.mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-2" })).rejects.toThrow("AUTHORIZATION_APPROVER_MISMATCH");
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+    expect(transaction.authorizationApproval.findFirst).toHaveBeenCalledTimes(1);
+    expect(transaction.purchase.create).not.toHaveBeenCalled();
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
   it("rejects a retry when the executor becomes inactive", async () => {
     const transaction = tx();
     db.authorizationRequest.findUnique.mockResolvedValue(authorization());
