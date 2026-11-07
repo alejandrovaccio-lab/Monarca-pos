@@ -359,6 +359,32 @@ describe("purchase authorization approver revalidation across serializable retri
     expect(transaction.auditLog.create).not.toHaveBeenCalled();
   });
 
+  it("rejects a retry when the authorization requester changes organization", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    let requesterLookupCount = 0;
+    transaction.user.findUnique.mockImplementation(async ({ where }: any) => {
+      if (where.id === "requester-1") {
+        requesterLookupCount += 1;
+        return { organizationId: requesterLookupCount === 1 ? "org-1" : "org-2" };
+      }
+      return { status: "ACTIVE", organizationId: "org-1", branchAccess: [{ branchId: "branch-1" }], roles: [{ role: { name: "GERENTE" } }] };
+    });
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("AUTHORIZATION_REFERENCE_INTEGRITY_VIOLATION");
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(requesterLookupCount).toBe(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
   it("rejects a retry when the purchase branch changes organization", async () => {
     const transaction = tx();
     db.authorizationRequest.findUnique.mockResolvedValue(authorization());
