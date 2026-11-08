@@ -352,6 +352,15 @@ describe("purchase authorization approver revalidation across serializable retri
     await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("PURCHASE_PRODUCT_INVALID");
     expect(db.$transaction).toHaveBeenCalledTimes(2);
     expect(transaction.product.findMany).toHaveBeenCalledTimes(2);
+    for (const call of transaction.product.findMany.mock.calls) {
+      expect(call[0]).toEqual(expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org-1",
+          branchProducts: { some: { branchId: "branch-1", isEnabled: true } },
+        }),
+        select: { id: true },
+      }));
+    }
     expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
     expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
     expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
