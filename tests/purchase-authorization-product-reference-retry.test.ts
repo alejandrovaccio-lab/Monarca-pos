@@ -85,4 +85,37 @@ describe("purchase authorization product reference integrity across serializable
     expect(transaction.productCost.create).not.toHaveBeenCalled();
     expect(transaction.auditLog.create).not.toHaveBeenCalled();
   });
+
+  it("rejects a retry when the product is no longer enabled or assigned to the purchase branch", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.product.findMany
+      .mockResolvedValueOnce([{ id: "product-1", organizationId: "org-1" }])
+      .mockResolvedValueOnce([]);
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" })).rejects.toThrow("PURCHASE_PRODUCT_INVALID");
+
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.product.findMany).toHaveBeenCalledTimes(2);
+    for (const [call] of transaction.product.findMany.mock.calls) {
+      expect(call).toEqual(expect.objectContaining({
+        where: {
+          id: { in: ["product-1"] },
+          organizationId: "org-1",
+          branchProducts: { some: { branchId: "branch-1", isEnabled: true } },
+        },
+        select: { id: true },
+      }));
+    }
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
 });
