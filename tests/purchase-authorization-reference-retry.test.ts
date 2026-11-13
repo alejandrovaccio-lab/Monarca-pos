@@ -223,4 +223,54 @@ describe("purchase authorization reference integrity across serializable retries
     expect(transaction.auditLog.create).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["NaN", Number.NaN],
+    ["above the supported maximum", 100_000_000_000],
+  ])("rejects a retry when the inventory balance is %s", async (_label, invalidQuantity) => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.inventoryBalance.findUnique.mockResolvedValue({ quantity: invalidQuantity });
+
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(
+      executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" }),
+    ).rejects.toThrow("PURCHASE_INVENTORY_INVALID");
+
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(2);
+    expect(transaction.inventoryBalance.findUnique).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a retry when the resulting inventory balance exceeds the supported maximum", async () => {
+    const transaction = tx();
+    db.authorizationRequest.findUnique.mockResolvedValue(authorization());
+    transaction.purchase.create.mockRejectedValueOnce(serializationConflict);
+    transaction.inventoryBalance.findUnique.mockResolvedValue({ quantity: 99_999_999_999.9999 });
+
+    db.$transaction
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction))
+      .mockImplementationOnce(async (callback: (value: any) => unknown) => callback(transaction));
+
+    await expect(
+      executeApprovedPurchaseReceipt({ requestId: "auth-1", executorId: "manager-1" }),
+    ).rejects.toThrow("PURCHASE_INVENTORY_INVALID");
+
+    expect(db.$transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.purchase.create).toHaveBeenCalledTimes(2);
+    expect(transaction.inventoryBalance.findUnique).toHaveBeenCalledTimes(1);
+    expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
+    expect(transaction.inventoryMovement.create).not.toHaveBeenCalled();
+    expect(transaction.productCost.create).not.toHaveBeenCalled();
+    expect(transaction.auditLog.create).not.toHaveBeenCalled();
+  });
+
+
 });
