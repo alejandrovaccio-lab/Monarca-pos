@@ -291,6 +291,16 @@ describe("purchase authorization reference integrity across serializable retries
 
     expect(db.$transaction).toHaveBeenCalledTimes(2);
     expect(transaction.product.findMany).toHaveBeenCalledTimes(2);
+    for (const call of transaction.product.findMany.mock.calls) {
+      expect(call[0]).toEqual(expect.objectContaining({
+        where: expect.objectContaining({
+          status: "ACTIVE",
+          organizationId: "org-1",
+          branchProducts: { some: { branchId: "branch-1", isEnabled: true } },
+        }),
+        select: { id: true },
+      }));
+    }
     expect(transaction.purchase.create).toHaveBeenCalledTimes(1);
     expect(transaction.inventoryBalance.findUnique).not.toHaveBeenCalled();
     expect(transaction.inventoryBalance.upsert).not.toHaveBeenCalled();
