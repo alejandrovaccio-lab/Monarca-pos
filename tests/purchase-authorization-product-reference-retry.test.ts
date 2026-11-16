@@ -106,6 +106,7 @@ describe("purchase authorization product reference integrity across serializable
         where: {
           id: { in: ["product-1"] },
           organizationId: "org-1",
+          status: "ACTIVE",
           branchProducts: { some: { branchId: "branch-1", isEnabled: true } },
         },
         select: { id: true },
